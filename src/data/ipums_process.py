@@ -21,23 +21,167 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass, field, asdict
 
 import polars as pl
-import pandas as pd  # used only for reading Excel (SOC aggregator)
 import yaml
 import logging
 import time
 import numpy as np
 from datetime import date
-try:
-    from pandas_datareader import data as web
-except Exception:
-    web = None
+from pandas_datareader import data as web
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler()]
-)
+# ANSI color codes for enhanced logging
+class Colors:
+    RESET = '\033[0m'
+    BOLD = '\033[1m'
+    DIM = '\033[2m'
+    
+    # Text colors
+    BLACK = '\033[30m'
+    RED = '\033[31m'
+    GREEN = '\033[32m'
+    YELLOW = '\033[33m'
+    BLUE = '\033[34m'
+    MAGENTA = '\033[35m'
+    CYAN = '\033[36m'
+    WHITE = '\033[37m'
+    
+    # Bright colors
+    BRIGHT_RED = '\033[91m'
+    BRIGHT_GREEN = '\033[92m'
+    BRIGHT_YELLOW = '\033[93m'
+    BRIGHT_BLUE = '\033[94m'
+    BRIGHT_MAGENTA = '\033[95m'
+    BRIGHT_CYAN = '\033[96m'
+    
+    # Background colors
+    BG_RED = '\033[41m'
+    BG_GREEN = '\033[42m'
+    BG_YELLOW = '\033[43m'
+
+class ColorFormatter(logging.Formatter):
+    """Custom formatter to add colors to log messages"""
+    
+    def __init__(self):
+        super().__init__()
+        
+    def format(self, record):
+        # Color mapping for log levels
+        level_colors = {
+            'DEBUG': Colors.DIM + Colors.WHITE,
+            'INFO': Colors.GREEN,
+            'WARNING': Colors.YELLOW,
+            'ERROR': Colors.BRIGHT_RED,
+            'CRITICAL': Colors.BG_RED + Colors.WHITE
+        }
+        
+        # Format timestamp in dark grey
+        timestamp = f"{Colors.DIM}{Colors.BLACK}{self.formatTime(record)}{Colors.RESET}"
+        
+        # Color the log level
+        level_color = level_colors.get(record.levelname, Colors.WHITE)
+        level_text = f"{level_color}{record.levelname}{Colors.RESET}"
+        
+        # Enhanced message formatting with smart highlighting
+        message = self.enhance_message(record.getMessage())
+        
+        return f"{timestamp} - {level_text} - {message}"
+    
+    def enhance_message(self, message: str) -> str:
+        """Add smart highlighting to important parts of log messages, and shorten repo paths."""
+        import re, os
+        # 1) Shorten absolute repo paths to repo-relative (e.g., data/raw/...)
+        def _shorten_abs_repo_paths(msg: str) -> str:
+            # Match absolute paths ending with common data/code extensions (supports .csv.gz)
+            pattern = r'(/[^/\s]+(?:/[^/\s]+)*\.(?:csv(?:\.gz)?|dta|json|xlsx?|ya?ml|parquet|feather|gz))'
+            def _repl(m: re.Match) -> str:
+                p = m.group(1)
+                try:
+                    root = str(REPO_ROOT)
+                    if p.startswith(root):
+                        rel = os.path.relpath(p, root).replace(os.sep, '/')
+                        return rel  # drop leading slash to be repo-relative
+                except Exception:
+                    pass
+                return p
+            return re.sub(pattern, _repl, msg)
+
+        message = _shorten_abs_repo_paths(message)
+
+        # 2) Highlight numbers with commas (like row counts)
+        message = re.sub(r'(\d{1,3}(?:,\d{3})+)', f'{Colors.BRIGHT_CYAN}\\1{Colors.RESET}', message)
+        
+        # Highlight large numbers without commas
+        message = re.sub(r'(\d{4,})', f'{Colors.BRIGHT_CYAN}\\1{Colors.RESET}', message)
+        
+        # Highlight percentages
+        message = re.sub(r'(\d+\.?\d*%)', f'{Colors.BRIGHT_YELLOW}\\1{Colors.RESET}', message)
+        
+        # 3) Highlight file paths (absolute or repo-relative)
+        path_pattern = r'((?:/|)(?:[^/\s]+/)*[^/\s]+\.(?:csv(?:\.gz)?|dta|json|xlsx?|ya?ml|parquet|feather|gz))'
+        message = re.sub(path_pattern, f'{Colors.CYAN}\\1{Colors.RESET}', message)
+        
+        # Highlight important keywords
+        keywords = {
+            'completed': Colors.BRIGHT_GREEN,
+            'failed': Colors.BRIGHT_RED,
+            'error': Colors.BRIGHT_RED,
+            'success': Colors.BRIGHT_GREEN,
+            'warning': Colors.YELLOW,
+            'missing': Colors.YELLOW,
+            'found': Colors.GREEN,
+            'saved': Colors.GREEN,
+            'loaded': Colors.GREEN,
+            'created': Colors.GREEN,
+            'processed': Colors.GREEN,
+            'filtered': Colors.BLUE,
+            'joined': Colors.BLUE,
+            'mapped': Colors.BLUE,
+            'aggregated': Colors.BLUE,
+        }
+        
+        for keyword, color in keywords.items():
+            pattern = re.compile(rf'\b({keyword})\b', re.IGNORECASE)
+            message = pattern.sub(f'{color}\\1{Colors.RESET}', message)
+        
+        # Highlight data processing steps
+        if 'Reweighting:' in message:
+            message = message.replace('Reweighting:', f'{Colors.BOLD}{Colors.MAGENTA}Reweighting:{Colors.RESET}')
+        
+        if 'Sanity:' in message:
+            message = message.replace('Sanity:', f'{Colors.BOLD}{Colors.CYAN}Sanity:{Colors.RESET}')
+        
+        if 'Bridge:' in message:
+            message = message.replace('Bridge:', f'{Colors.BOLD}{Colors.BLUE}Bridge:{Colors.RESET}')
+        
+        if 'CPS:' in message:
+            message = message.replace('CPS:', f'{Colors.BOLD}{Colors.GREEN}CPS:{Colors.RESET}')
+        
+        if 'ATUS:' in message:
+            message = message.replace('ATUS:', f'{Colors.BOLD}{Colors.YELLOW}ATUS:{Colors.RESET}')
+        
+        # Highlight targets vs actual values
+        if 'target' in message.lower():
+            message = re.sub(r'(target[^\d]*)([\d.]+%?)', f'\\1{Colors.BRIGHT_BLUE}\\2{Colors.RESET}', message)
+        
+        return message
+
+# Set up colored logging
+def setup_colored_logging():
+    """Configure colored logging for the module"""
+    # Remove existing handlers to avoid duplicates
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+    
+    # Create console handler with color formatter
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(ColorFormatter())
+    
+    logging.root.addHandler(console_handler)
+    logging.root.setLevel(logging.INFO)
+    
+    return logging.getLogger(__name__)
+
+# Initialize colored logging
+logger = setup_colored_logging()
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -264,174 +408,141 @@ def map_with_crosswalk(
     return joined.drop(["__key", "__val"], strict=False)
 
 
-def load_soc_aggregator(path: Path) -> pl.DataFrame:
-    """Load SOC structure and normalize to expected column names.
-
-    Tries a couple of header offsets and column name variants, then returns a
-    DataFrame with columns: Detailed Occupation, Broad Group, Minor Group, Major Group.
+def add_soc_groupings(df: pl.DataFrame, occ_col: str, prefix: str | None = None) -> pl.DataFrame:
     """
-    tried: list[pd.DataFrame] = []
-    for skip in (7, 0, 1, 2):
-        try:
-            df = pd.read_excel(path, skiprows=skip)
-            tried.append(df)
-        except Exception:
-            continue
-
-    if not tried:
-        raise RuntimeError(f"Unable to read SOC aggregator: {path}")
-
-    # Choose the first with the most columns
-    agg = max(tried, key=lambda d: d.shape[1])
-
-    # Normalize columns to expected names when possible
-    colmap = {}
-    lower = {c.lower(): c for c in agg.columns}
-    # Common variants
-    det = lower.get("detailed occupation") or lower.get("detailed occupation code") or lower.get("detailed") or lower.get("detailed soc")
-    bro = lower.get("broad group") or lower.get("broad occupation") or lower.get("broad soc")
-    minor = lower.get("minor group") or lower.get("minor occupation") or lower.get("minor soc")
-    major = lower.get("major group") or lower.get("major occupation") or lower.get("major soc")
-    if det:
-        colmap[det] = "Detailed Occupation"
-    if bro:
-        colmap[bro] = "Broad Group"
-    if minor:
-        colmap[minor] = "Minor Group"
-    if major:
-        colmap[major] = "Major Group"
-    agg = agg.rename(columns=colmap)
-
-    expected = {"Detailed Occupation", "Broad Group", "Minor Group", "Major Group"}
-    missing = expected.difference(agg.columns)
-    if missing:
-        raise RuntimeError(f"SOC aggregator missing columns: {sorted(missing)}")
-    # Convert to Polars for downstream processing
-    return pl.from_pandas(agg)
-
-
-def normalize_soc_agg(agg: pl.DataFrame) -> pl.DataFrame:
-    """Forward-fill SOC hierarchy so each row carries Major/Minor/Broad with Detailed."""
-    cols = ["Major Group", "Minor Group", "Broad Group", "Detailed Occupation"]
-    df = agg.select([pl.col(c).cast(pl.Utf8).str.strip_chars().alias(c) for c in cols])
-    df = df.with_row_count("_order").sort("_order")
-    df = df.with_columns([
-        pl.col("Major Group").forward_fill(),
-        pl.col("Minor Group").forward_fill(),
-        pl.col("Broad Group").forward_fill(),
-        pl.col("Detailed Occupation"),
-    ])
-    # Normalize codes to XX-XXXX length where present
-    df = df.with_columns([
-        pl.when(pl.col(c).is_not_null()).then(pl.col(c).str.slice(0, 7)).otherwise(pl.col(c)).alias(c)
-        for c in cols
-    ])
-    return df.drop("_order")
-
-
-def add_soc_groupings(df: pl.DataFrame, occ_col: str, agg: pl.DataFrame, prefix: str = "OCCSOC") -> pl.DataFrame:
+    Create SOC groupings using only occ_col text:
+    - Normalize: replace X/x -> 0, keep first 7 chars (XX-XXXX).
+    - detailed: last digit != 0 (e.g., 11-1111)
+    - broad: last digit == 0 and second-to-last != 0 (e.g., 11-1110)
+    - minor: last three digits == 000 and 4th-to-last != 0 (e.g., 11-1000)
+    Produces {prefix}_detailed, {prefix}_broad, {prefix}_minor.
     """
-    Add SOC groupings based on the original modify_occupation_codes logic.
-    This assumes the occ_col already contains SOC codes (from OCC->SOC mapping).
-    """
-    # Use normalized aggregator with forward-filled hierarchy
-    agg_f = normalize_soc_agg(agg)
+    prefix = prefix or occ_col
 
-    # Membership lists
-    detailed_list = agg_f.get_column("Detailed Occupation").unique().to_list()
-    broad_list    = agg_f.get_column("Broad Group").unique().to_list()
-    minor_list    = agg_f.get_column("Minor Group").unique().to_list()
-    major_list    = agg_f.get_column("Major Group").unique().to_list()
+    # Normalize to 7-char SOC and digits-only helper, treating "0" as null
+    out = (
+        df.with_columns([
+            pl.col(occ_col).cast(pl.Utf8).str.strip_chars()
+                .str.replace_all(r"(?i)X", "0")
+                .str.slice(0, 7)
+                .pipe(lambda x: pl.when(x == "0").then(None).otherwise(x))
+                .alias("__occ"),
+        ])
+    )
 
-    # Dictionaries from filled data
-    det_rows = agg_f.filter(pl.col("Detailed Occupation").is_not_null())
-    soc_dict_broad = dict(zip(det_rows.get_column("Detailed Occupation").to_list(),
-                              det_rows.get_column("Broad Group").to_list()))
-    soc_dict_minor = dict(zip(det_rows.get_column("Detailed Occupation").to_list(),
-                              det_rows.get_column("Minor Group").to_list()))
-    b2m_df = agg_f.select(["Broad Group", "Minor Group"]).unique()
-    soc_dict_broad_to_minor = dict(zip(b2m_df.get_column("Broad Group").to_list(),
-                                       b2m_df.get_column("Minor Group").to_list()))
+    # Masks
+    detailed = (pl.col("__occ").str.slice(-1) != "0")
+    broad = (pl.col("__occ").str.slice(-1) == "0") & (pl.col("__occ").str.slice(-2, 1) != "0")
+    minor = (pl.col("__occ").str.slice(-3) == "000") & (pl.col("__occ").str.slice(-4, 1) != "0")
 
-    # Classify level of occ_col
-    df = df.with_columns([
-        pl.when(pl.col(occ_col).is_in(detailed_list)).then(pl.lit("detailed"))
-        .when(pl.col(occ_col).is_in(broad_list)).then(pl.lit("broad"))
-        .when(pl.col(occ_col).is_in(minor_list)).then(pl.lit("minor"))
-        .when(pl.col(occ_col).is_in(major_list)).then(pl.lit("major"))
-        .otherwise(pl.lit("none"))
-        .alias(f"{prefix}_group")
+    # Outputs
+    out = out.with_columns([
+        pl.when(detailed).then(pl.col("__occ")).otherwise(None).alias(f"{prefix}_detailed"),
+        pl.when(broad).then(pl.col("__occ"))
+         .when(detailed).then(pl.col("__occ").str.slice(0, 6) + pl.lit("0"))
+         .otherwise(None).alias(f"{prefix}_broad"),
+        pl.when(minor).then(pl.col("__occ"))
+         .when(detailed).then(pl.col("__occ").str.slice(0, 4) + pl.lit("000"))
+         .when(detailed).then(pl.col("__occ").str.slice(0, 4) + pl.lit("000"))
+         .otherwise(None).alias(f"{prefix}_minor"),
     ])
 
-    # Detailed
-    df = df.with_columns([
-        pl.when(pl.col(f"{prefix}_group") == "detailed").then(pl.col(occ_col)).otherwise(pl.lit(None)).alias(f"{prefix}_detailed")
-    ])
-
-    # Broad: keep if broad, map if detailed
-    df = df.with_columns([
-        pl.when(pl.col(f"{prefix}_group") == "broad").then(pl.col(occ_col))
-        .when(pl.col(f"{prefix}_group") == "detailed")
-        .then(pl.col(occ_col).cast(pl.Utf8).replace_strict(soc_dict_broad, default=None))
-        .otherwise(pl.lit(None))
-        .alias(f"{prefix}_broad")
-    ])
-
-    # Minor: keep if minor, map from broad/detailed
-    df = df.with_columns([
-        pl.when(pl.col(f"{prefix}_group") == "minor").then(pl.col(occ_col))
-        .when(pl.col(f"{prefix}_group") == "broad")
-        .then(pl.col(occ_col).cast(pl.Utf8).replace_strict(soc_dict_broad_to_minor, default=None))
-        .when(pl.col(f"{prefix}_group") == "detailed")
-        .then(pl.col(occ_col).cast(pl.Utf8).replace_strict(soc_dict_minor, default=None))
-        .otherwise(pl.lit(None))
-        .alias(f"{prefix}_minor")
-    ])
-
-    return df.drop([f"{prefix}_group"], strict=False)
+    return out.drop(["__occ", "__digits"], strict=False)
 
 
-def assign_teleworkability(df: pl.DataFrame, agg: pl.DataFrame, tw_path: Path, occ_det_col: str, out_prefix: str = "TELEWORKABLE_OCSSOC") -> pl.DataFrame:
+def assign_teleworkability(
+                            df: pl.DataFrame,
+                            tw_path: Path,
+                            occ_col: str,
+                            map_cfg: dict,
+                            out_prefix: str = "TELEWORKABLE_OCSSOC"
+                        ) -> pl.DataFrame:
+    
+    # 1) Load teleworkability file
     if not tw_path.exists():
         return df
     tw = pl.read_csv(str(tw_path))
-    # Normalize expected columns
-    cols_lower = {c.lower(): c for c in tw.columns}
-    occ_col = cols_lower.get("occ_code") or cols_lower.get("occsoc") or "OCC_CODE"
-    tel_col = cols_lower.get("teleworkable") or "TELEWORKABLE"
-    tw = tw.rename({occ_col: "OCC_CODE", tel_col: "TELEWORKABLE"}).select([
-        pl.col("OCC_CODE").cast(pl.Utf8), pl.col("TELEWORKABLE").cast(pl.Float64)
+
+    # 2) Use config for mapping columns
+    cw_key = map_cfg.get("crosswalk_key", "OCC_CODE")
+    cw_value = map_cfg.get("target_column", "TELEWORKABLE")
+
+    # 3) Normalize OCC codes in teleworkability crosswalk to 7-char SOC and X->0
+    tw = tw.select([
+        pl.col(cw_key).cast(pl.Utf8).str.strip_chars()
+            .str.slice(0, 7)
+            .str.replace_all(r"(?i)X", "0")
+            .alias("OCC"),
+        pl.col(cw_value).cast(pl.Float64).alias("TELEWORKABLE"),
     ])
 
-    # Detailed level join
-    left = df.with_columns(pl.col(occ_det_col).cast(pl.Utf8))
-    left = left.join(tw, left_on=occ_det_col, right_on="OCC_CODE", how="left")
-    left = left.rename({"TELEWORKABLE": f"TELEWORKABLE_{occ_det_col.upper()}"}).drop(["OCC_CODE"], strict=False)
-
-    # Group averages: map OCC_CODE -> Broad/Minor via agg
-    occ_to_group = agg.select([
-        pl.col("Detailed Occupation").cast(pl.Utf8).alias("OCC_CODE"),
-        pl.col("Broad Group").cast(pl.Utf8),
-        pl.col("Minor Group").cast(pl.Utf8),
-    ])
-    tw_cl = tw.join(occ_to_group, on="OCC_CODE", how="left")
-    tw_broad = tw_cl.group_by("Broad Group", maintain_order=False).agg(pl.col("TELEWORKABLE").mean().alias("TW_BROAD"))
-    tw_minor = tw_cl.group_by("Minor Group", maintain_order=False).agg(pl.col("TELEWORKABLE").mean().alias("TW_MINOR"))
-
-    base = occ_det_col.replace("_detailed", "")
-    broad_col = base + "_broad"
-    minor_col = base + "_minor"
-
-    out = left.join(
-        tw_broad.rename({"Broad Group": broad_col, "TW_BROAD": f"TELEWORKABLE_{base.upper()}_broad"}),
-        on=broad_col,
-        how="left",
-    ).join(
-        tw_minor.rename({"Minor Group": minor_col, "TW_MINOR": f"TELEWORKABLE_{base.upper()}_minor"}),
-        on=minor_col,
-        how="left",
+    # 4) Ensure single row per detailed OCC (average if duplicates)
+    tw_det = (
+        tw.group_by("OCC").agg(pl.col("TELEWORKABLE").mean().alias(f"{out_prefix}_detailed"))
     )
-    return out
+
+    # 5) Build broad/minor keys and aggregate
+    # Broad: 15-1121 -> 15-1120
+    tw_broad = (
+        tw_det.with_columns((pl.col("OCC").str.slice(0, 6) + pl.lit("0")).alias("OCC_broad"))
+            .group_by("OCC_broad")
+            .agg(pl.col(f"{out_prefix}_detailed").mean().alias(f"{out_prefix}_broad"))
+    )
+    # Minor: 15-1121 -> 15-1100
+    tw_minor = (
+        tw_det.with_columns((pl.col("OCC").str.slice(0, 4) + pl.lit("000")).alias("OCC_minor"))
+            .group_by("OCC_minor")
+            .agg(pl.col(f"{out_prefix}_detailed").mean().alias(f"{out_prefix}_minor"))
+    )
+
+    # 6) Determine base occ prefix (handle if caller passed *_detailed/_broad/_minor)
+    if occ_col.endswith("_detailed"):
+        base = occ_col[: -len("_detailed")]
+    elif occ_col.endswith("_broad"):
+        base = occ_col[: -len("_broad")]
+    elif occ_col.endswith("_minor"):
+        base = occ_col[: -len("_minor")]
+    else:
+        base = occ_col
+
+    # 7) Normalize left join keys to same format (7-char SOC, X->0)
+    out = df
+    # Detailed
+    det_col = f"{base}_detailed"
+    if det_col in out.columns:
+        out = out.with_columns(
+            pl.col(det_col).cast(pl.Utf8).str.strip_chars()
+                .str.slice(0, 7)
+                .str.replace_all(r"(?i)X", "0")
+                .alias("__det")
+        )
+        out = out.join(tw_det, left_on="__det", right_on="OCC", how="left").drop(["OCC"], strict=False)
+
+    # Broad
+    broad_col = f"{base}_broad"
+    if broad_col in out.columns:
+        out = out.with_columns(
+            pl.col(broad_col).cast(pl.Utf8).str.strip_chars()
+                .str.slice(0, 7)
+                .str.replace_all(r"(?i)X", "0")
+                .alias("__broad")
+        )
+        out = out.join(tw_broad, left_on="__broad", right_on="OCC_broad", how="left").drop(["OCC_broad"], strict=False)
+
+    # Minor
+    minor_col = f"{base}_minor"
+    if minor_col in out.columns:
+        out = out.with_columns(
+            pl.col(minor_col).cast(pl.Utf8).str.strip_chars()
+                .str.slice(0, 7)
+                .str.replace_all(r"(?i)X", "0")
+                .alias("__minor")
+        )
+        out = out.join(tw_minor, left_on="__minor", right_on="OCC_minor", how="left").drop(["OCC_minor"], strict=False)
+
+    # 8) Clean up temp columns
+    return out.drop(["__det", "__broad", "__minor"], strict=False)
+
 
 
 def reweight_poststrat(
@@ -631,7 +742,8 @@ def add_topcode_and_real_wages(data: pl.DataFrame) -> pl.DataFrame:
     # Explicit listed thresholds column
     data = data.with_columns(
         pl.struct(["YEAR", "MONTH", "MISH"]).map_elements(
-            lambda s: hour_topcode_dict.get((s["YEAR"], s["MONTH"], s["MISH"]), None)
+            lambda s: hour_topcode_dict.get((s["YEAR"], s["MONTH"], s["MISH"]), None),
+            return_dtype=pl.Float64
         ).alias("HOUR_TOPCODE_THRESHOLD")
     )
 
@@ -639,7 +751,7 @@ def add_topcode_and_real_wages(data: pl.DataFrame) -> pl.DataFrame:
     monthly_max = (
         data.group_by(["YEAR", "MONTH"]).agg([
             pl.col("WAGE").max().alias("MONTH_MAX_WAGE"),
-            pl.count().alias("MONTH_COUNT"),
+            pl.len().alias("MONTH_COUNT"),
         ])
     )
     data = data.join(monthly_max, on=["YEAR", "MONTH"], how="left")
@@ -654,7 +766,7 @@ def add_topcode_and_real_wages(data: pl.DataFrame) -> pl.DataFrame:
 
     max_counts = (
         data.filter(pl.col("WAGE") == pl.col("MONTH_MAX_WAGE"))
-        .group_by(["YEAR", "MONTH"]).agg(pl.count().alias("MAX_WAGE_COUNT"))
+        .group_by(["YEAR", "MONTH"]).agg(pl.len().alias("MAX_WAGE_COUNT"))
     )
     data = data.join(max_counts, on=["YEAR", "MONTH"], how="left")
     data = data.with_columns([
@@ -696,7 +808,13 @@ def add_topcode_and_real_wages(data: pl.DataFrame) -> pl.DataFrame:
                 .otherwise(None).alias("LOG_WAGE_REAL"),
             ])
     else:
-        logging.warning("CPI series empty; real wage variables not created.")
+        logging.warning("CPI series empty; falling back to nominal wages for real/log wage variables.")
+        data = data.with_columns([
+            pl.col("WAGE").alias("WAGE_REAL"),
+            pl.when(pl.col("WAGE").is_not_null() & (pl.col("WAGE") > 0))
+             .then(pl.col("WAGE").log())
+             .otherwise(None).alias("LOG_WAGE_REAL"),
+        ])
 
     # Diagnostics
     try:
@@ -717,7 +835,7 @@ def atus_pipeline(cfg: Config) -> Path:
     df = pl.read_csv(str(atus_micro_path))
     logger.info(f"ATUS: Loaded {len(df):,} rows from {atus_micro_path}")
 
-    # Ensure columns exist per fetch logic
+    # Ensure core columns exist; DATE/HOLIDAY are optional with safe fallbacks
     for c in ["YEAR", "CPSIDP", "WHERE", "ACTIVITY", "DURATION"]:
         if c not in df.columns:
             raise RuntimeError(f"Missing required ATUS column: {c}")
@@ -730,21 +848,32 @@ def atus_pipeline(cfg: Config) -> Path:
     # Drop any records with unknown location
     df = df.filter(~pl.col("WHERE").is_in(where_unknown))
 
-    # Drop Any Records where Diary Day was a Holliday
-    df = df.filter(~pl.col("HOLIDAY").is_in([1]))
+    # Drop any records where diary day was a holiday if available; treat non-integer as integer
+    if "HOLIDAY" in df.columns:
+        df = df.with_columns(pl.col("HOLIDAY").cast(pl.Int64, strict=False))
+        df = df.filter(~pl.col("HOLIDAY").is_in([1]))
+    else:
+        logger.warning("ATUS: HOLIDAY column not found; not excluding holidays.")
 
-    # 1) Parse YYYYMMDD to a proper Date
-    df = df.with_columns(
-        pl.col("DATE").cast(pl.Utf8).str.strptime(pl.Date, "%Y%m%d", strict=True).alias("DATE")
-    )
+    # 1) Parse YYYYMMDD to extract proper Date, Month, and weekday
+    if "DATE" in df.columns:
+        df = df.with_columns([
+            pl.when(pl.col("DATE").cast(pl.Utf8).str.len_chars() >= 8)
+              .then(pl.col("DATE").cast(pl.Utf8).str.slice(0,8).str.strptime(pl.Date, "%Y%m%d", strict=False))
+              .otherwise(None).alias("DATE_PARSED")
+        ])
+        df = df.with_columns([
+            pl.when(pl.col("DATE_PARSED").is_not_null()).then(pl.col("DATE_PARSED").dt.month()).otherwise(pl.lit(6)).alias("MONTH"),
+            pl.when(pl.col("DATE_PARSED").is_not_null()).then(pl.col("DATE_PARSED").dt.weekday()).otherwise(pl.lit(2)).alias("DAY_OF_WEEK")
+        ])
+        # Keep original DATE column, drop the temporary parsed one
+        df = df.drop("DATE_PARSED")
+    else:
+        logger.warning("ATUS: DATE column not found; assuming June (MONTH=6) and weekdays.")
+       
 
-    # 2) Derive weekday (Mon=0 ... Sun=6)
-    df = df.with_columns(
-        pl.col("DATE").dt.weekday().alias("DAY_OF_WEEK")
-    )
-
-    # 3) Keep only weekdays (Mon–Fri)
-    df = df.filter(pl.col("DAY_OF_WEEK") < 5)
+    # Convert MONTH to Int32 to match CPS schema
+    df = df.with_columns(pl.col("MONTH").cast(pl.Int32))
 
     # Identify main‐job work (501xx) and home location
     is_work = (pl.col("ACTIVITY") // 100 == 501)
@@ -762,11 +891,17 @@ def atus_pipeline(cfg: Config) -> Path:
           .alias("work_minutes"),
     ])
 
+    # Create a weight column by coalescing WT06 and WT20, and drop WT06 and WT20
+    df = df.with_columns(
+        pl.coalesce(pl.col("WT06"), pl.col("WT20")).alias("ATUS_WT")
+    ).drop("WT06", "WT20", strict=False)
+
     # Aggregate to person‐year and derive flags
     link = (
-        df.group_by(["YEAR", "CPSIDP"]).agg([
+        df.group_by(["YEAR", "MONTH", "CPSIDP"]).agg([
             pl.col("remote_minutes").sum().alias("remote_minutes"),
             pl.col("work_minutes").sum().alias("work_minutes"),
+            pl.col("ATUS_WT").mean().alias("ATUS_WT")
         ])
         .with_columns([
             (pl.col("work_minutes") > 0).alias("worked"),
@@ -821,15 +956,14 @@ def acs_pipeline(cfg: Config) -> Path:
         df = df.with_columns((pl.col("TRANWORK").cast(pl.Utf8) == "80").cast(pl.Int8).alias("WFH"))
         logger.info(f"ACS: Added WFH flag")
 
-        # SOC groupings and teleworkability (ACS OCCSOC present)
+    # SOC groupings and teleworkability (ACS OCCSOC present)
     cw_cfg = cfg.crosswalks
-    soc_path = Path(resolve_tokens(cw_cfg["soc_aggregator"]["path"], cfg))
-    agg = load_soc_aggregator(soc_path)
     if "OCCSOC" in df.columns:
         df = df.with_columns(pl.col("OCCSOC").cast(pl.Utf8).str.strip_chars())
-        df = add_soc_groupings(df, "OCCSOC", agg, prefix="OCCSOC")
+        df = add_soc_groupings(df, "OCCSOC", prefix="OCCSOC")
         tw_path = Path(resolve_tokens(cw_cfg["teleworkability"]["path"], cfg))
-        df = assign_teleworkability(df, agg, tw_path, "OCCSOC_detailed", out_prefix="TELEWORKABLE_OCSSOC")
+        tw_map_cfg = cw_cfg["teleworkability"]["map"]
+        df = assign_teleworkability(df, tw_path, "OCCSOC", tw_map_cfg, out_prefix="TELEWORKABLE_OCSSOC")
         logger.info(f"ACS: Added SOC groupings and teleworkability")
 
     # PUMA->CBSA and state mappings
@@ -875,21 +1009,12 @@ def cps_pipeline(cfg: Config) -> Path:
     if not cps_micro_path.exists():
         raise FileNotFoundError(f"CPS raw not found: {cps_micro_path}")
 
-    atus_link_path = cfg.get_output_path("atus_link", cfg.processed_dir / "atus_link.csv").resolve()
-    if not atus_link_path.exists():
-        raise FileNotFoundError(f"ATUS link not found: {atus_link_path}. Run ATUS pipeline first.")
-
     cps = pl.read_csv(str(cps_micro_path))
-    atus = pl.read_csv(str(atus_link_path))
     logger.info(f"CPS: Loaded {len(cps):,} rows from {cps_micro_path}")
-    logger.info(f"CPS: Loaded {len(atus):,} ATUS linkage records")
 
     for col in ["YEAR", "MONTH"]:
         if col in cps.columns:
             cps = cps.with_columns(pl.col(col).cast(pl.Int32))
-    if "YEAR" in atus.columns:
-        atus = atus.with_columns(pl.col("YEAR").cast(pl.Int32))
-
 
 
     # Industry mapping (CPS IND -> NAICS definitive)
@@ -899,150 +1024,178 @@ def cps_pipeline(cfg: Config) -> Path:
     ind_cw = pl.read_csv(str(ind_path))
     cps = map_with_crosswalk(cps, ind_cw, ind_cfg["map"]["source_column"], ind_cfg["map"]["crosswalk_key"], ind_cfg["map"]["target_column"], out_col=ind_cfg.get("output_column", "IND_MAPPED"))
     logger.info(f"CPS: Mapped industry codes")
+    
+    # Ensure a common alias for downstream: if only IND_MAPPED exists, create INDNAICS alias
+    if ("INDNAICS" not in cps.columns) and ("IND_MAPPED" in cps.columns):
+        cps = cps.with_columns(pl.col("IND_MAPPED").alias("INDNAICS"))
 
-    # OCC -> SOC mapping with aggregation for multiple mappings
-    soc_path = Path(resolve_tokens(cw_cfg["soc_aggregator"]["path"], cfg))
-    agg = load_soc_aggregator(soc_path)
+    # OCC -> SOC mapping (assumes one-to-one mapping in the crosswalk)
     occsoc_cfg = cw_cfg["cps_occ_to_soc"]
     occsoc_path = Path(resolve_tokens(occsoc_cfg["path"], cfg))
     occsoc_cw = pl.read_csv(str(occsoc_path))
-    
-    # Process OCC->SOC mapping to handle multiple mappings by aggregating to common prefix levels
-    cps_to_soc_mappings = occsoc_cw.group_by(
-        pl.col(occsoc_cfg["map"]["crosswalk_key"]).cast(pl.Utf8)  # Ensure OCC is a string
-    ).agg(pl.col(occsoc_cfg["map"]["target_column"]).alias("SOC"))
-    
-    # Create dictionary to handle multiple mappings like in original code
-    cps_to_soc_dict = {}
-    multiple_mappings_count = 0
-    
-    for row in cps_to_soc_mappings.iter_rows(named=True):
-        cps_code = str(row[occsoc_cfg["map"]["crosswalk_key"]])
-        soc_codes = row["SOC"]
-        
-        # If only one SOC code, use it directly
-        if len(soc_codes) == 1:
-            cps_to_soc_dict[cps_code] = str(soc_codes[0])
-            continue
-            
-        # For multiple mappings, find common prefix at appropriate level
-        multiple_mappings_count += 1
-        
-        # Try detailed level first (full code)
-        if all(code == soc_codes[0] for code in soc_codes):
-            cps_to_soc_dict[cps_code] = str(soc_codes[0])
-            continue
-            
-        # Try broad level (xx-xxxx)
-        broad_prefixes = [code[:6] for code in soc_codes if len(str(code)) >= 6]
-        if len(set(broad_prefixes)) == 1 and len(broad_prefixes) == len(soc_codes):
-            aggregated_code = broad_prefixes[0] + "00"
-            cps_to_soc_dict[cps_code] = aggregated_code
-            continue
-            
-        # Try minor level (xx-xx)
-        minor_prefixes = [code[:4] for code in soc_codes if len(str(code)) >= 4]
-        if len(set(minor_prefixes)) == 1 and len(minor_prefixes) == len(soc_codes):
-            aggregated_code = minor_prefixes[0] + "00"
-            cps_to_soc_dict[cps_code] = aggregated_code
-            continue
-            
-        # Default to major level (xx)
-        major_prefixes = [code[:2] for code in soc_codes if len(str(code)) >= 2]
-        if len(set(major_prefixes)) == 1 and len(major_prefixes) == len(soc_codes):
-            aggregated_code = major_prefixes[0] + "-0000"
-            cps_to_soc_dict[cps_code] = aggregated_code
-            continue
-            
-        # If no common prefix, assign null no clear occupational mapping
-        cps_to_soc_dict[cps_code] = None
-    
-    logger.info(f"CPS: Created OCC->SOC crosswalk with {len(cps_to_soc_dict)} mappings")
-    logger.info(f"CPS: Found {multiple_mappings_count} OCC codes with multiple SOC mappings")
-    
-    # Apply the crosswalk to map OCC codes to SOC codes
-    cps = cps.with_columns(pl.col("OCC").cast(pl.Utf8).str.strip_chars())
-    
-    # Map OCC to SOC using the processed dictionary
-    cps = cps.with_columns(
-        pl.col("OCC").replace_strict(cps_to_soc_dict, default=None).alias("OCCSOC")
+
+    # Normalize OCC and map to SOC via left join
+    occ_src = occsoc_cfg.get("map", {}).get("source_column", "OCC")
+    cps = cps.with_columns(pl.col(occ_src).cast(pl.Utf8).str.strip_chars().alias(occ_src))
+    cps = map_with_crosswalk(
+        cps,
+        occsoc_cw,
+        source_col=occ_src,
+        cw_key=occsoc_cfg["map"]["crosswalk_key"],
+        cw_value=occsoc_cfg["map"]["target_column"],
+        out_col="OCCSOC",
     )
 
-    # Patch: Ensure OCCSOC codes are exactly 7 characters long (XX-XXXX)
+    # Ensure OCCSOC codes are exactly 7 characters
     cps = cps.with_columns(
         pl.when(pl.col("OCCSOC").is_not_null())
-        .then(pl.col("OCCSOC").str.slice(0, 7))  # Trim to 7 characters
-        .otherwise(pl.col("OCCSOC"))
-        .alias("OCCSOC")
+          .then(pl.col("OCCSOC").cast(pl.Utf8).str.slice(0, 7))
+          .otherwise(pl.col("OCCSOC"))
+          .alias("OCCSOC")
     )
-    
-    # Log mapping results
+
+    # Replace the character "X" in OCCSOC with "0"
+    cps = cps.with_columns(
+            pl.col("OCCSOC")
+                .cast(pl.Utf8)
+                .str.replace_all(r"(?i)X", "0")
+                .alias("OCCSOC")
+    )
+
     mapped_count = cps.filter(pl.col("OCCSOC").is_not_null()).height
     total_count = len(cps)
-    logger.info(f"CPS: Successfully mapped {mapped_count:,}/{total_count:,} OCC codes to SOC ({mapped_count/total_count:.1%})")
+    count_zero = cps.filter(pl.col("OCCSOC") == "0").height
+    logger.info(f"CPS: Successfully mapped {mapped_count:,}/{total_count:,} OCC codes to SOC ({mapped_count/total_count:.1%}) with {count_zero:,} codes mapped to '0' ({count_zero/total_count:.1%})")
 
-    cps = add_soc_groupings(cps, "OCCSOC", agg, prefix="OCCSOC")
+    cps = add_soc_groupings(cps, "OCCSOC", prefix="OCCSOC")
     tw_path = Path(resolve_tokens(cw_cfg["teleworkability"]["path"], cfg))
-    cps = assign_teleworkability(cps, agg, tw_path, "OCCSOC_detailed", out_prefix="TELEWORKABLE_OCSSOC")
+    tw_map_cfg = cw_cfg["teleworkability"]["map"]
+    cps = assign_teleworkability(cps, tw_path, "OCCSOC", tw_map_cfg, out_prefix="TELEWORKABLE_OCSSOC")
     logger.info(f"CPS: Added SOC groupings and teleworkability")
 
-
-
-    # Keep all rows pre-2022; left join ATUS on CPSIDP+YEAR
-    cps = cps.join( 
-            atus.select(["YEAR", "CPSIDP", "remote_minutes", "work_minutes", "any_remote"]),
-            on=["YEAR", "CPSIDP"],
-            how="left"
+    # Ensure cell components exist before building cell_id
+    # occ2_harmonized from OCCSOC (2-digit SOC major group)
+    if "occ2_harmonized" not in cps.columns and "OCCSOC" in cps.columns:
+        cps = cps.with_columns(
+            pl.when(pl.col("OCCSOC").is_not_null())
+              .then(pl.col("OCCSOC").cast(pl.Utf8).str.slice(0, 2))
+              .otherwise(pl.lit(None))
+              .alias("occ2_harmonized")
         )
-    logger.info(f"CPS: After joining with ATUS data: {len(cps):,} rows")
-    # Telework variables:
-    # After 2022: use TELWRKPAY/TELWRKHR/UHRSWORKT logic exactly as specified.
-    # For pre-2022 (and any rows where ALPHA remains null, including early 2022 months), fill using minutes ratio.
+
+    # ind_broad from INDNAICS (2-digit NAICS -> sector)
+    if "ind_broad" not in cps.columns and "INDNAICS" in cps.columns:
+        ind2 = pl.col("INDNAICS").cast(pl.Utf8).str.strip_chars().str.slice(0, 2)
+        cps = cps.with_columns(
+            pl.when(ind2 == "11").then(pl.lit("agriculture_forestry_fishing"))
+             .when(ind2 == "21").then(pl.lit("mining_oil_gas"))
+             .when(ind2 == "22").then(pl.lit("utilities"))
+             .when(ind2 == "23").then(pl.lit("construction"))
+             .when(ind2.is_in(["31", "32", "33"])).then(pl.lit("manufacturing"))
+             .when(ind2 == "42").then(pl.lit("wholesale_trade"))
+             .when(ind2.is_in(["44", "45"])).then(pl.lit("retail_trade"))
+             .when(ind2.is_in(["48", "49"])).then(pl.lit("transportation_warehousing"))
+             .when(ind2 == "51").then(pl.lit("information"))
+             .when(ind2 == "52").then(pl.lit("finance_insurance"))
+             .when(ind2 == "53").then(pl.lit("real_estate_rental"))
+             .when(ind2 == "54").then(pl.lit("professional_scientific_technical"))
+             .when(ind2 == "55").then(pl.lit("management_companies"))
+             .when(ind2 == "56").then(pl.lit("administrative_support_waste"))
+             .when(ind2 == "61").then(pl.lit("educational_services"))
+             .when(ind2 == "62").then(pl.lit("health_care_social_assistance"))
+             .when(ind2 == "71").then(pl.lit("arts_entertainment_recreation"))
+             .when(ind2 == "72").then(pl.lit("accommodation_food_services"))
+             .when(ind2 == "81").then(pl.lit("other_services"))
+             .when(ind2 == "92").then(pl.lit("public_administration"))
+             .otherwise(pl.lit(None))
+             .alias("ind_broad")
+        )
+
+    # ftpt from UHRSWORKT (>=35 fulltime)
+    if "ftpt" not in cps.columns and "UHRSWORKT" in cps.columns:
+        cps = cps.with_columns(
+            pl.when(pl.col("UHRSWORKT").cast(pl.Float64) >= 35)
+              .then(pl.lit("fulltime"))
+              .otherwise(pl.lit("parttime"))
+              .alias("ftpt")
+        )
+
+    # edu3 from EDUC (coarse bins; adjust if you have a detailed codebook)
+    if "edu3" not in cps.columns and "EDUC" in cps.columns:
+        cps = cps.with_columns(
+            pl.when(pl.col("EDUC") < 111).then(pl.lit("lt_ba"))     # HS or some college
+             .when(pl.col("EDUC") < 123).then(pl.lit("ba"))         # Bachelor's
+             .otherwise(pl.lit("adv"))                              # Advanced
+             .alias("edu3")
+        )
+
+    # age4 from AGE (25–34, 35–44, 45–54, 55–64)
+    if "age4" not in cps.columns and "AGE" in cps.columns:
+        cps = cps.with_columns(
+            pl.when(pl.col("AGE") < 25).then(pl.lit(None))
+             .when(pl.col("AGE") <= 34).then(pl.lit("25-34"))
+             .when(pl.col("AGE") <= 44).then(pl.lit("35-44"))
+             .when(pl.col("AGE") <= 54).then(pl.lit("45-54"))
+             .when(pl.col("AGE") <= 64).then(pl.lit("55-64"))
+             .otherwise(pl.lit(None))
+             .alias("age4")
+        )
+
+    # sex from SEX (1 male, 2 female)
+    if "sex" not in cps.columns and "SEX" in cps.columns:
+        cps = cps.with_columns(
+            pl.when(pl.col("SEX") == 1).then(pl.lit("male"))
+             .when(pl.col("SEX") == 2).then(pl.lit("female"))
+             .otherwise(pl.lit(None))
+             .alias("sex")
+        )
+
+    # state from STATEFIP
+    if "state" not in cps.columns and "STATEFIP" in cps.columns:
+        cps = cps.with_columns(
+            pl.col("STATEFIP").cast(pl.Utf8).str.pad_start(2, "0").alias("state")
+        )
+
+
+    # Add cell_id creation early for ATUS join compatibility
+    cps = _derive_cell_components(cps)
+    logger.info(f"CPS: Added cell_id components early for ATUS compatibility")
+
+
+    # Telework variables: After 2022 use TELWRKPAY/TELWRKHR/UHRSWORKT logic
     has_post_cols = all(col in cps.columns for col in ["TELWRKHR", "TELWRKPAY", "UHRSWORKT"])
     if has_post_cols:
-        # Cast TELWRKHR to float
-        cps = cps.with_columns( pl.col("TELWRKHR").cast(pl.Float64) )
-        cps = cps.with_columns(
-                pl.when(pl.col("TELWRKPAY") == "0")                           # NIU → not in universe
-                        .then(pl.lit(None))                                      # leave ALPHA_TEL null
-                    .when(pl.col("TELWRKPAY") == "2")                           # Pay flag=2 → no telework
-                        .then(0.0)                                               # ALPHA_TEL = 0
-                    .when(pl.col("TELWRKPAY") == "1")                           # Pay flag=1 → compute share
-                        .then(
-                            pl.when(pl.col("UHRSWORKT").is_in([0, 997, 999])        # invalid total hours
-                            | (pl.col("TELWRKHR") == 999)       )              # or invalid remote hours
-                                .then(pl.lit(None))                                 # drop to null
-                            .otherwise(pl.col("TELWRKHR") / pl.col("UHRSWORKT")))
-                    .otherwise(pl.lit(None))                                  # any other code → null
-                .alias("_ALPHA_TEL")
-            )
-    else:
-        cps = cps.with_columns(pl.lit(None).cast(pl.Float64).alias("_ALPHA_TEL"))
-
-    # Fallback ALPHA from ATUS minutes for rows with null ALPHA (pre-2022 and early 2022)
-    has_minutes = all(col in cps.columns for col in ["remote_minutes", "work_minutes"])
-    if has_minutes:
+        # Cast to numeric types once
         cps = cps.with_columns([
-            pl.col("remote_minutes").cast(pl.Float64).alias("remote_minutes"),
-            pl.col("work_minutes").cast(pl.Float64).alias("work_minutes"),
+            pl.col("TELWRKHR").cast(pl.Float64),
+            pl.col("TELWRKPAY").cast(pl.Int64),
+            pl.col("UHRSWORKT").cast(pl.Float64),
         ])
-        # 2) Minutes‐based fallback (pre‐2022 or missing hours info):
         cps = cps.with_columns(
-            pl.when((pl.col("work_minutes") > 0) & pl.col("remote_minutes").is_not_null())
-            .then(pl.col("remote_minutes") / pl.col("work_minutes"))
+            pl.when(pl.col("TELWRKPAY") == 0)  # NIU
+             .then(pl.lit(None))
+            .when(pl.col("TELWRKPAY") == 2)   # No telework
+             .then(0.0)
+            .when(pl.col("TELWRKPAY") == 1)   # Compute share
+             .then(
+                pl.when(
+                    pl.col("UHRSWORKT").is_in([0.0, 997.0, 999.0]) | (pl.col("TELWRKHR") == 999.0)
+                ).then(pl.lit(None))
+                 .otherwise(pl.col("TELWRKHR") / pl.col("UHRSWORKT"))
+             )
             .otherwise(pl.lit(None))
-            .alias("_ALPHA_MIN")
-        )
-    else:
-        cps = cps.with_columns(pl.lit(None).cast(pl.Float64).alias("_ALPHA_MIN"))
-
-    # 3) Final ALPHA: prefer hours‐based, then minutes‐based, then clamp to [0,1]
-    cps = cps.with_columns(pl.coalesce([pl.col("_ALPHA_TEL"), pl.col("_ALPHA_MIN")]).alias("ALPHA")
-            ).with_columns(pl.when(pl.col("ALPHA") > 1).then(1.0)
-            .when(pl.col("ALPHA") < 0).then(0.0)
-            .otherwise(pl.col("ALPHA"))
             .alias("ALPHA")
         )
+    else:
+        cps = cps.with_columns(pl.lit(None).cast(pl.Float64).alias("ALPHA"))
+
+    # Final ALPHA clamp to [0,1]
+    cps = cps.with_columns(
+        pl.when(pl.col("ALPHA").is_not_null())
+        .then(pl.col("ALPHA").clip(0.0, 1.0))
+        .otherwise(pl.col("ALPHA"))
+        .alias("ALPHA")
+    )
 
     # Dummies and WFH from final ALPHA
     cps = cps.with_columns([
@@ -1050,133 +1203,69 @@ def cps_pipeline(cfg: Config) -> Path:
         (pl.col("ALPHA").is_not_null() & (pl.col("ALPHA") == 1)).cast(pl.Int64).alias("FULL_REMOTE"),
         (pl.col("ALPHA").is_not_null() & (pl.col("ALPHA") > 0) & (pl.col("ALPHA") < 1)).cast(pl.Int64).alias("HYBRID"),
         (pl.col("ALPHA").is_not_null() & (pl.col("ALPHA") > 0)).cast(pl.Int64).alias("WFH"),
-    ]).drop(["_ALPHA_TEL", "_ALPHA_MIN"], strict=False)
+    ])
 
-    # Optional yearly stats if columns present - CALCULATE BEFORE ANY WAGE FILTERING
-    if all(c in cps.columns for c in ["YEAR", "WFH", "FULL_INPERSON", "FULL_REMOTE", "HYBRID"]):
-        # Only do this simple average when TELEWORK information is present
-        cps_filt = cps.filter(
-            pl.col("ALPHA").is_not_null()
-        )
-        # Compute weighted averages using WTFINL as weight column
-        stats = (
-            cps_filt.group_by("YEAR")
-            .agg([
-            (pl.col("WFH") * pl.col("WTFINL")).sum() / pl.col("WTFINL").sum().alias("WFH"),
-            (pl.col("FULL_INPERSON") * pl.col("WTFINL")).sum() / pl.col("WTFINL").sum().alias("FULL_INPERSON"),
-            (pl.col("FULL_REMOTE") * pl.col("WTFINL")).sum() / pl.col("WTFINL").sum().alias("FULL_REMOTE"),
-            (pl.col("HYBRID") * pl.col("WTFINL")).sum() / pl.col("WTFINL").sum().alias("HYBRID"),
-            pl.len().alias("N")
-            ])
-            .sort("YEAR")
-        )
-        print("\nYearly statistics for WFH dummies (BEFORE wage filtering):")
-        for row in stats.iter_rows(named=True):
-            print(f"Year {row['YEAR']}: WFH={row['WFH']:.3f}, Full In-Person={row['FULL_INPERSON']:.3f}, Full Remote={row['FULL_REMOTE']:.3f}, Hybrid={row['HYBRID']:.3f}, N={row['N']:,}")
-    logger.info("WFH, ALPHA, FULL_INPERSON, FULL_REMOTE, HYBRID variables created.")
-
-    # ------------------------------------------------------------
-    # Construct WAGE from HOURWAGE2/EARNWEEK2/UHRSWORKT (ignore legacy HOURWAGE/EARNWEEK)
-    # ------------------------------------------------------------
+    # Construct WAGE from HOURWAGE2/EARNWEEK2/UHRSWORKT - NO FILTERING, preserve nulls
     has_wage_cols = all(c in cps.columns for c in ["HOURWAGE2", "EARNWEEK2", "UHRSWORKT"])
     if has_wage_cols:
-        # Ensure numeric types for operations
         cps = cps.with_columns([
             pl.col("HOURWAGE2").cast(pl.Float64, strict=False).alias("HOURWAGE2"),
             pl.col("EARNWEEK2").cast(pl.Float64, strict=False).alias("EARNWEEK2"),
             pl.col("UHRSWORKT").cast(pl.Float64, strict=False).alias("UHRSWORKT"),
         ])
 
-        initial_n = len(cps)
-        # Keep rows with usable wage info according to provided logic
-        cps = cps.filter(
-            (pl.col("HOURWAGE2") != 999.99)
-            | (
-                (~pl.col("EARNWEEK2").is_in([9999.99, 999999.99]))
-                & (~pl.col("UHRSWORKT").is_in([999, 997]))
-            )
-        )
-        logger.info(
-            f"CPS: Dropped rows with invalid wage information (from {initial_n:,} to {len(cps):,})."
-        )
-
-        # Build WAGE from HOURWAGE2 else EARNWEEK2/UHRSWORKT
+        # Build WAGE - allow nulls, no filtering
         cps = cps.with_columns([
-            pl.when(pl.col("HOURWAGE2") != 999.99)
+            pl.when((pl.col("HOURWAGE2").is_not_null()) & (pl.col("HOURWAGE2") != 999.99))
             .then(pl.col("HOURWAGE2"))
             .when(
-                ((pl.col("UHRSWORKT") == 999) | (pl.col("UHRSWORKT") == 997))
-                & (~pl.col("EARNWEEK2").is_in([9999.99, 999999.99]))
+                (pl.col("EARNWEEK2").is_not_null()) & (~pl.col("EARNWEEK2").is_in([9999.99, 999999.99])) &
+                (pl.col("UHRSWORKT").is_not_null()) & (~pl.col("UHRSWORKT").is_in([999, 997]))
             )
             .then(pl.col("EARNWEEK2") / pl.col("UHRSWORKT"))
             .otherwise(None)
-            .alias("WAGE_TEMP2")
+            .alias("WAGE")
         ])
-
-        cps = cps.with_columns(
-            pl.col("WAGE_TEMP2").alias("WAGE")
-        )
-        logger.info("CPS: Created WAGE from HOURWAGE2 or EARNWEEK2/UHRSWORKT.")
-
-        # Log non-null counts for wage-related columns
-        for col in ["HOURWAGE2", "EARNWEEK2", "UHRSWORKT", "WAGE"]:
-            non_null = cps.filter(~pl.col(col).is_null()).height
-            logger.info(f"CPS: Column {col} has {non_null:,} non-null values.")
-
-        cps = cps.drop(["WAGE_TEMP2"], strict=False)
+        logger.info("CPS: Created WAGE from HOURWAGE2 or EARNWEEK2/UHRSWORKT (preserving nulls)")
     else:
         logger.info("CPS: Skipping wage construction; required columns not present.")
 
+    # Save full processed dataset with all original records
     out_path = cfg.get_output_path("cps", (cfg.processed_dir / "cps" / "cps_processed.csv").resolve())
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    cps = cps.drop(["__rid"], strict=False)  # Clean any temp columns
     cps.write_csv(str(out_path))
-    logger.info(f"CPS: Final dataset has {len(cps):,} rows, saved to {out_path}")
+    logger.info(f"CPS: Full dataset with {len(cps):,} rows saved to {out_path}")
 
-    # ------------------------------------------------------------
-    # Additional exports requested:
-    # 1) CPS subset where ALPHA is not null (there is info about remote work)
-    # 2) Same subset but dropping rows where WAGE is null
-    #    Also drop rows where required controls are invalid or missing.
-    # ------------------------------------------------------------
-    # Controls filters
+    # Controls filter function
     def apply_controls_filter(df: pl.DataFrame) -> pl.DataFrame:
-        # Prepare typed columns safely
         df2 = df
-        # CLASSWKR filtering: drop 00/99/null
         if "CLASSWKR" in df2.columns:
             df2 = df2.with_columns(pl.col("CLASSWKR").cast(pl.Utf8, strict=False).str.strip_chars().alias("CLASSWKR"))
             df2 = df2.filter(pl.col("CLASSWKR").is_not_null() & (~pl.col("CLASSWKR").is_in(["00", "99"])))
-        # AGE != 999 and not null
         if "AGE" in df2.columns:
             df2 = df2.with_columns(pl.col("AGE").cast(pl.Int32, strict=False).alias("AGE"))
             df2 = df2.filter(pl.col("AGE").is_not_null() & (pl.col("AGE") != 999))
-        # SEX != 9 and not null
         if "SEX" in df2.columns:
             df2 = df2.with_columns(pl.col("SEX").cast(pl.Int32, strict=False).alias("SEX"))
             df2 = df2.filter(pl.col("SEX").is_not_null() & (pl.col("SEX") != 9))
-        # RACE != 999 and not null
         if "RACE" in df2.columns:
             df2 = df2.with_columns(pl.col("RACE").cast(pl.Int32, strict=False).alias("RACE"))
             df2 = df2.filter(pl.col("RACE").is_not_null() & (pl.col("RACE") != 999))
-        # HISPAN not in {901, 999} and not null
         if "HISPAN" in df2.columns:
             df2 = df2.with_columns(pl.col("HISPAN").cast(pl.Int32, strict=False).alias("HISPAN"))
             df2 = df2.filter(pl.col("HISPAN").is_not_null() & (~pl.col("HISPAN").is_in([901, 999])))
         return df2
 
-    # 1) ALPHA present subset -> apply reweighting for wage nonresponse and attach adjusted weights where available
+    # ALPHA + controls subset
     alpha_present = cps.filter(pl.col("ALPHA").is_not_null())
     before_ctrl = len(alpha_present)
     alpha_present = apply_controls_filter(alpha_present)
-    logger.info(
-        f"CPS: ALPHA-present subset size: {before_ctrl:,} -> {len(alpha_present):,} after controls filter"
-    )
+    logger.info(f"CPS: ALPHA-present subset: {before_ctrl:,} -> {len(alpha_present):,} after controls filter")
 
-    # Reweighting: compute adjusted weights using response availability (here response_col='WAGE')
+    # Reweighting for ALPHA subset
     if "WTFINL" in alpha_present.columns:
         target_univ, resp_sub_adj = reweight_poststrat(alpha_present, weight_col="WTFINL", response_col="WAGE", min_wage=0)
-        # Merge adjusted weights back into ALPHA-present universe (resp_sub_adj has WTFINL_ADJ for rows with response)
-        # Use a stable key: if CPSIDP exists use that + YEAR + MONTH else fallback to row count index
         key_cols = [c for c in ["YEAR", "MONTH", "CPSIDP"] if c in alpha_present.columns]
         if key_cols:
             alpha_present = alpha_present.join(
@@ -1185,56 +1274,729 @@ def cps_pipeline(cfg: Config) -> Path:
                 how="left"
             )
         else:
-            alpha_present = alpha_present.with_row_count("__rid")
-            resp_sub_adj = resp_sub_adj.with_row_count("__rid")
+            alpha_present = alpha_present.with_row_index(name="__rid")
+            resp_sub_adj = resp_sub_adj.with_row_index(name="__rid")
             alpha_present = alpha_present.join(resp_sub_adj.select(["__rid", "WTFINL_ADJ"]), on="__rid", how="left").drop("__rid")
 
-        # Replace weight column with adjusted weight, keep old as <WEIGHT>_OLD
         alpha_present = alpha_present.with_columns(pl.col("WTFINL").alias("WTFINL_OLD"))
         alpha_present = alpha_present.with_columns(
             pl.when(pl.col("WTFINL_ADJ").is_not_null()).then(pl.col("WTFINL_ADJ")).otherwise(pl.col("WTFINL")).alias("WTFINL")
         ).drop(["WTFINL_ADJ"], strict=False)
-    else:
-        logger.warning("CPS: WTFINL not found; skipping reweighting for ALPHA-present subset.")
 
-    # Apply topcoding and real wage adjustment
     alpha_present = add_topcode_and_real_wages(alpha_present)
-
     alpha_present_path = (cfg.processed_dir / "cps" / "cps_alpha_present_reweighted.csv").resolve()
     alpha_present_path.parent.mkdir(parents=True, exist_ok=True)
     alpha_present.write_csv(str(alpha_present_path))
-    logger.info(f"CPS: Wrote ALPHA-present (with adjusted weights column WTFINL_ADJ where applicable) to {alpha_present_path}")
+    logger.info(f"CPS: ALPHA-present + controls subset saved to {alpha_present_path}")
 
-    # 2) ALPHA present and WAGE present -> this already has wage; ensure WTFINL_ADJ present; if missing, set WTFINL_ADJ = WTFINL
-    alpha_wage_present = alpha_present
-    if "WAGE" in alpha_wage_present.columns:
-        alpha_wage_present = alpha_wage_present.filter(pl.col("WAGE").is_not_null())
-    # Ensure weights: keep old, and use adjusted if available else original
-    if "WTFINL" in alpha_wage_present.columns:
-        if "WTFINL_OLD" not in alpha_wage_present.columns:
-            alpha_wage_present = alpha_wage_present.with_columns(pl.col("WTFINL").alias("WTFINL_OLD"))
-        # Already replaced in alpha_present; just ensure column exists
-        # No-op replacement to keep consistent pipeline
-        alpha_wage_present = alpha_wage_present.with_columns(pl.col("WTFINL").alias("WTFINL"))
-    logger.info(f"CPS: ALPHA-present + WAGE-present subset size: {len(alpha_wage_present):,}")
-    # Apply topcoding and real wage adjustment
+    # ALPHA + WAGE + controls subset
+    alpha_wage_present = alpha_present.filter(pl.col("WAGE").is_not_null())
     alpha_wage_present = add_topcode_and_real_wages(alpha_wage_present)
-
     alpha_wage_present_path = (cfg.processed_dir / "cps" / "cps_alpha_wage_present_reweighted.csv").resolve()
     alpha_wage_present.write_csv(str(alpha_wage_present_path))
-    logger.info(f"CPS: Wrote ALPHA-present + WAGE-present (reweighted) subset to {alpha_wage_present_path}")
+    logger.info(f"CPS: ALPHA + WAGE + controls subset ({len(alpha_wage_present):,} rows) saved to {alpha_wage_present_path}")
+
     return out_path
 
 
+def _derive_cell_components(df: pl.DataFrame) -> pl.DataFrame:
+    """Derive cell_id, psi, and high_psi_flag from demographic variables"""
+    
+    # Create cell_id from key demographic variables
+    # Format: "occ2|ind_broad|ftpt|edu3|age4|sex|state"
+    cell_vars = ["occ2_harmonized", "ind_broad", "ftpt", "edu3", "age4", "sex", "state"]
+    
+    # Ensure all required variables exist, convert to string
+    df_with_strings = df
+    for var in cell_vars:
+        if var in df.columns:
+            df_with_strings = df_with_strings.with_columns(
+                pl.col(var).cast(pl.Utf8).alias(var)
+            )
+        else:
+            # Add placeholder if missing
+            df_with_strings = df_with_strings.with_columns(
+                pl.lit("unknown").alias(var)
+            )
+    
+    # Create cell_id by concatenating with "|"
+    df_with_strings = df_with_strings.with_columns(
+        pl.concat_str([pl.col(var) for var in cell_vars], separator="|").alias("cell_id")
+    )
+    
+    # Create psi and high_psi_flag (placeholder logic - adjust as needed)
+    if "TELEWORKABLE_OCSSOC_3D" in df.columns:
+        df_with_strings = df_with_strings.with_columns([
+            pl.col("TELEWORKABLE_OCSSOC_3D").cast(pl.Float64).alias("psi"),
+            (pl.col("TELEWORKABLE_OCSSOC_3D").cast(pl.Float64) > 0.5).cast(pl.Int8).alias("high_psi_flag")
+        ])
+    else:
+        df_with_strings = df_with_strings.with_columns([
+            pl.lit(0.5).alias("psi"),
+            pl.lit(0).cast(pl.Int8).alias("high_psi_flag")
+        ])
+    
+    return df_with_strings
+
+
+def _winsorize_by_year(df: pl.DataFrame, col: str, lower_pct: float, upper_pct: float) -> pl.DataFrame:
+    """Winsorize a column by year at specified percentiles"""
+    
+    # Calculate percentiles by year
+    percentiles = (
+        df.filter(pl.col(col).is_not_null())
+        .group_by("YEAR")
+        .agg([
+            pl.col(col).quantile(lower_pct).alias("lower_bound"),
+            pl.col(col).quantile(upper_pct).alias("upper_bound")
+        ])
+    )
+    
+    # Join back to main dataframe and winsorize
+    df_winsorized = (
+        df.join(percentiles, on="YEAR", how="left")
+        .with_columns([
+            pl.when(pl.col(col).is_not_null())
+            .then(
+                pl.col(col)
+                .clip(pl.col("lower_bound"), pl.col("upper_bound"))
+            )
+            .otherwise(pl.col(col))
+            .alias(col)
+        ])
+        .drop(["lower_bound", "upper_bound"])
+    )
+    
+    return df_winsorized
+
+
+def _export_stata(df: pl.DataFrame, file_path: Path) -> None:
+    """Export a Polars DataFrame to Stata .dta format via pandas"""
+    
+    # Convert to pandas for Stata export
+    df_pandas = df.to_pandas()
+    
+    # Ensure directory exists
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Save to Stata format
+    df_pandas.to_stata(str(file_path), write_index=False, version=119)
+    
+    logger.info(f"Exported {len(df):,} rows to {file_path}")
+
+
+def preestimation_procedure(cfg: Config,
+                            random_seed: int = 123,
+                            bootstrap_reps: int = 500,
+                            write_schema: bool = True,
+                            produce_bridge: bool = True) -> dict[str, Path]:
+    """Build Stata-ready artifacts with moved age/hours filters"""
+    np.random.seed(random_seed)
+
+    # Load inputs
+    cps_path = cfg.get_output_path("cps", (cfg.processed_dir / "cps" / "cps_processed.csv").resolve())
+    atus_link_path = cfg.get_output_path("atus_link", (cfg.processed_dir / "atus_link.csv").resolve())
+    if not cps_path.exists():
+        raise FileNotFoundError(f"Missing CPS processed: {cps_path}")
+    if not atus_link_path.exists():
+        raise FileNotFoundError(f"Missing ATUS link: {atus_link_path}")
+
+    cps = pl.read_csv(str(cps_path),  schema_overrides = {"INDNAICS" : pl.String})
+    atus_link = pl.read_csv(str(atus_link_path))
+
+    # ATUS Processing first (before applying filters) - cell_id already available from CPS pipeline
+    atus_person = (
+        atus_link.with_columns([
+            pl.when(pl.col("work_minutes") > 0)
+            .then((pl.col("remote_minutes") / pl.col("work_minutes")).cast(pl.Float64))
+            .otherwise(None).alias("alpha_atus"),
+        ])
+    )
+    
+    # Use unfiltered CPS for ATUS join to maximize coverage - cell_id already present
+    key = ["YEAR", "MONTH", "CPSIDP"] if "MONTH" in atus_person.columns else ["YEAR", "CPSIDP"]
+    atus_join = atus_person.join(cps.select(key + (["cell_id"])), on=key, how="left")
+
+    atus_join = atus_join.filter(pl.col("cell_id").is_not_null())
+
+    # NOTE: Removed duplicate/corrupted early ATUS collapse code here.
+    # The correct ATUS cell×year aggregation is implemented below in section:
+    # "3) ATUS Processing to cell×year".
+
+    # Collapse ATUS to cell×year 
+    wt_col = "ATUS_WT" if "ATUS_WT" in atus_join.columns else None
+    def _wmean(col: str) -> pl.Expr:
+        return (
+            (pl.col(col) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
+            (pl.col(wt_col).sum() if wt_col else pl.len())
+        )
+
+    atus_cell = (
+        atus_join.with_columns([
+            (pl.col("work_minutes") > 0).alias("worked"),
+            (pl.col("remote_minutes") > 0).alias("any_remote"),
+            ((pl.col("remote_minutes") == pl.col("work_minutes")) & (pl.col("work_minutes") > 0)).alias("full_remote"),
+            ((pl.col("remote_minutes") == 0) & (pl.col("work_minutes") > 0)).alias("full_inperson"),
+            ((pl.col("remote_minutes") > 0) & (pl.col("remote_minutes") < pl.col("work_minutes"))).alias("hybrid"),
+        ])
+        .group_by(["YEAR", "cell_id"]).agg([
+            # unconditional day prob
+            _wmean("any_remote").alias("p_RH"),
+            # conditional on workday
+            (
+                (pl.when(pl.col("worked")).then(pl.col("any_remote").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
+                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
+            ).alias("p_RH_workday"),
+            (
+                (pl.when(pl.col("worked")).then(pl.col("alpha_atus").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
+                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
+            ).alias("mean_alpha_workday"),
+            (
+                (pl.when(pl.col("worked")).then(pl.col("full_remote").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
+                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
+            ).alias("share_remote_day"),
+            (
+                (pl.when(pl.col("worked")).then(pl.col("hybrid").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
+                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
+            ).alias("share_hybrid_day"),
+            (
+                (pl.when(pl.col("worked")).then(pl.col("full_inperson").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
+                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
+            ).alias("share_inperson_day"),
+            pl.len().alias("N_diaries"),
+        ])
+    )
+
+    # Add placeholder columns to ATUS measures
+    atus_cell = atus_cell.with_columns([
+        pl.lit(None).cast(pl.Float64).alias("se_p_RH"),
+        pl.lit(None).cast(pl.Float64).alias("se_p_RH_workday"),
+        pl.lit(None).cast(pl.Float64).alias("se_mean_alpha_workday"),
+        pl.lit(None).cast(pl.Float64).alias("se_share_remote_day"),
+        pl.lit(None).cast(pl.Float64).alias("se_share_hybrid_day"),
+        pl.lit(None).cast(pl.Float64).alias("se_share_inperson_day"),
+        pl.col("N_diaries").cast(pl.Float64).alias("n_eff_diaries"),
+        pl.lit(0).cast(pl.Int8).alias("pooled_flag"),
+        pl.lit("501xx").alias("workcode_spec"),
+        pl.lit("WT06/WT20 coalesce").alias("weight_spec"),
+    ])
+
+    # NOW apply the moved filters to CPS
+    logger.info(f"CPS: Before age/hours filters: {len(cps):,} rows")
+    for c in ["AGE", "UHRSWORKT"]:
+        if c not in cps.columns:
+            raise RuntimeError(f"CPS missing required column {c}")
+    
+    cps = cps.filter((pl.col("AGE") >= 25) & (pl.col("AGE") <= 64))
+    cps = cps.filter((pl.col("UHRSWORKT") >= 20) & (pl.col("UHRSWORKT") <= 84))
+    logger.info(f"CPS: After age/hours filters: {len(cps):,} rows")
+
+    # Continue with rest of pre-estimation procedure...
+    # 2.1 Filters: employed ages 25–64, hours guard 20–84
+    for c in ["AGE", "UHRSWORKT"]:
+        if c not in cps.columns:
+            raise RuntimeError(f"CPS missing required column {c}")
+    cps = cps.filter((pl.col("AGE") >= 25) & (pl.col("AGE") <= 64))
+    cps = cps.filter((pl.col("UHRSWORKT") >= 20) & (pl.col("UHRSWORKT") <= 84))
+
+    # 2.2 Weights: recompute wage nonresponse post-stratification here to ensure availability
+    # Build a minimal strat set present in cps to compute adjusted weights
+    strat_cols = [c for c in ["YEAR", "SEX", "EDUC", "RACE"] if c in cps.columns]
+    # Derive AGE_GROUP if AGE present
+    if "AGE" in cps.columns:
+        cps = cps.with_columns(
+            pl.when(pl.col("AGE") < 18).then(pl.lit(None))
+             .when(pl.col("AGE") <= 24).then(pl.lit('18-24'))
+             .when(pl.col("AGE") <= 34).then(pl.lit('25-34'))
+             .when(pl.col("AGE") <= 44).then(pl.lit('35-44'))
+             .when(pl.col("AGE") <= 54).then(pl.lit('45-54'))
+             .when(pl.col("AGE") <= 64).then(pl.lit('55-64'))
+             .otherwise(pl.lit('65+')).alias('AGE_GROUP')
+        )
+        strat_cols.append("AGE_GROUP")
+    # If we have WTFINL and WAGE, compute adjusted weights
+    if ("WTFINL" in cps.columns) and ("WAGE" in cps.columns) and strat_cols:
+        target_univ, wage_present = reweight_poststrat(cps.select([*(set(strat_cols)|{"WTFINL","WAGE","YEAR"})]), weight_col="WTFINL", response_col="WAGE", min_wage=0, cell_vars=strat_cols)
+        # Join adjusted weights back by row id
+        cps = cps.with_row_index(name="__rid")
+        wage_present = wage_present.with_row_index(name="__rid")
+        cps = cps.join(wage_present.select(["__rid", "WTFINL_ADJ"]), on="__rid", how="left").drop("__rid")
+
+        cps = cps.with_columns(pl.col("WTFINL").alias("WTFINL_OLD"))
+        cps = cps.with_columns(
+            pl.when(pl.col("WTFINL_ADJ").is_not_null()).then(pl.col("WTFINL_ADJ")).otherwise(pl.col("WTFINL")).alias("WTFINL")
+        ).drop(["WTFINL_ADJ"], strict=False)
+    else:
+        # Fallback to existing weights
+        if "WTFINL_ADJ" in cps.columns:
+            cps = cps.with_columns(pl.col("WTFINL_ADJ").alias("cps_weight"))
+        elif "WTFINL" in cps.columns:
+            cps = cps.with_columns(pl.col("WTFINL").alias("cps_weight"))
+        else:
+            cps = cps.with_columns(pl.lit(1.0).alias("cps_weight"))
+
+    # 2.3 Wages & Deflation: ensure LOG_WAGE_REAL, and winsorize within year
+    # If WAGE_REAL/LOG_WAGE_REAL not present, call helper
+    has_real = ("WAGE_REAL" in cps.columns) and ("LOG_WAGE_REAL" in cps.columns)
+    if not has_real:
+        cps = add_topcode_and_real_wages(cps)
+    cps = cps.with_columns([
+        pl.col("LOG_WAGE_REAL").alias("logw"),
+        pl.col("WAGE").alias("WAGE"),
+    ])
+    cps = _winsorize_by_year(cps, "logw", 0.01, 0.99)
+
+    # 2.4 Derive cells and psi/high_psi_flag - cell_id already exists from CPS pipeline
+    if "cell_id" not in cps.columns:
+        logger.warning("CPS: cell_id missing; re-deriving from scratch")
+        cps = _derive_cell_components(cps)
+    else:
+        # Ensure psi and high_psi_flag are present even if cell_id exists
+        if "psi" not in cps.columns:
+            if "TELEWORKABLE_OCSSOC_DETAILED" in cps.columns:
+                cps = cps.with_columns([
+                    pl.col("TELEWORKABLE_OCSSOC_DETAILED").cast(pl.Float64).alias("psi"),
+                    (pl.col("TELEWORKABLE_OCSSOC_DETAILED").cast(pl.Float64) > 0.5).cast(pl.Int8).alias("high_psi_flag")
+                ])
+            else:
+                cps = cps.with_columns([
+                    pl.lit(0.5).alias("psi"),
+                    pl.lit(0).cast(pl.Int8).alias("high_psi_flag")
+                ])
+        logger.info("CPS: Using existing cell_id from pipeline; ensured psi components present")
+
+    # 2.5 Observed Telework (2022–2025): ALPHA already in cps_processed; recompute if needed
+    if "ALPHA" not in cps.columns and {"TELWRKHR", "UHRSWORKT"}.issubset(cps.columns):
+        cps = cps.with_columns((pl.col("TELWRKHR") / pl.col("UHRSWORKT")).alias("ALPHA"))
+    for d, expr in {
+        "FULL_REMOTE": (pl.col("ALPHA") == 1.0),
+        "FULL_INPERSON": (pl.col("ALPHA") == 0.0),
+        "HYBRID": (pl.col("ALPHA") > 0.0) & (pl.col("ALPHA") < 1.0),
+    }.items():
+        if d not in cps.columns:
+            cps = cps.with_columns(expr.cast(pl.Int8).alias(d))
+
+    # 2.6 Outputs schema
+    keep_cols = [
+        "YEAR", "MONTH", "cps_weight", "logw", "WAGE", "UHRSWORKT",
+        "occ2_harmonized", "ind_broad", "ftpt", "edu3", "age4", "sex", "state",
+        "cell_id", "psi", "high_psi_flag",
+        "ALPHA", "TELWRKHR", "TELWRKPAY", "FULL_REMOTE", "HYBRID", "FULL_INPERSON"
+    ]
+    # Attach placeholders for ATUS-projected fields
+    for c in ["p_RH_workday", "w_RH", "w_IP"]:
+        if c not in cps.columns:
+            cps = cps.with_columns(pl.lit(None).cast(pl.Float64).alias(c))
+
+    cps_mi = cps.select([c for c in keep_cols + ["p_RH_workday", "w_RH", "w_IP"] if c in cps.columns])
+    cps_obs = cps_mi.filter(pl.col("YEAR") >= 2022)
+
+    # 3) ATUS Processing to cell×year
+    # Build per-person alpha_atus on workdays
+    atus_person = (
+        atus_link.with_columns([
+            pl.when(pl.col("work_minutes") > 0)
+            .then((pl.col("remote_minutes") / pl.col("work_minutes")).cast(pl.Float64))
+            .otherwise(None).alias("alpha_atus"),
+        ])
+    )
+    # Attach cells via CPS join on YEAR,CPSIDP (left join to retain only those with CPS cell info)
+    key = ["YEAR", "CPSIDP"]
+    atus_join = atus_person.join(cps.select(key + ["cell_id"]).unique(), on=key, how="left")
+    atus_join = atus_join.filter(pl.col("cell_id").is_not_null())
+
+    # Collapse to cell×year with weights if available
+    # We don't have diary weights in the link file; if present, use ATUS_WT; else equal weights.
+    wt_col = "ATUS_WT" if "ATUS_WT" in atus_join.columns else None
+    def _wmean(col: str) -> pl.Expr:
+        return (
+            (pl.col(col) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
+            (pl.col(wt_col).sum() if wt_col else pl.len())
+        )
+
+    atus_cell = (
+        atus_join.with_columns([
+            (pl.col("work_minutes") > 0).alias("worked"),
+            (pl.col("remote_minutes") > 0).alias("any_remote"),
+            ((pl.col("remote_minutes") == pl.col("work_minutes")) & (pl.col("work_minutes") > 0)).alias("full_remote"),
+            ((pl.col("remote_minutes") == 0) & (pl.col("work_minutes") > 0)).alias("full_inperson"),
+            ((pl.col("remote_minutes") > 0) & (pl.col("remote_minutes") < pl.col("work_minutes"))).alias("hybrid"),
+        ])
+        .group_by(["YEAR", "cell_id"]).agg([
+            # unconditional day prob
+            _wmean("any_remote").alias("p_RH"),
+            # conditional on workday
+            (
+                (pl.when(pl.col("worked")).then(pl.col("any_remote").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
+                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
+            ).alias("p_RH_workday"),
+            (
+                (pl.when(pl.col("worked")).then(pl.col("alpha_atus").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
+                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
+            ).alias("mean_alpha_workday"),
+            (
+                (pl.when(pl.col("worked")).then(pl.col("full_remote").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
+                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
+            ).alias("share_remote_day"),
+            (
+                (pl.when(pl.col("worked")).then(pl.col("hybrid").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
+                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
+            ).alias("share_hybrid_day"),
+            (
+                (pl.when(pl.col("worked")).then(pl.col("full_inperson").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
+                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
+            ).alias("share_inperson_day"),
+            pl.len().alias("N_diaries"),
+        ])
+    )
+
+    # Placeholder SEs and effective n; bootstrapping optional (expensive)
+    atus_cell = atus_cell.with_columns([
+        pl.lit(None).cast(pl.Float64).alias("se_p_RH"),
+        pl.lit(None).cast(pl.Float64).alias("se_p_RH_workday"),
+        pl.lit(None).cast(pl.Float64).alias("se_mean_alpha_workday"),
+        pl.lit(None).cast(pl.Float64).alias("se_share_remote_day"),
+        pl.lit(None).cast(pl.Float64).alias("se_share_hybrid_day"),
+        pl.lit(None).cast(pl.Float64).alias("se_share_inperson_day"),
+        pl.col("N_diaries").cast(pl.Float64).alias("n_eff_diaries"),
+        pl.lit(0).cast(pl.Int8).alias("pooled_flag"),
+        pl.lit("501xx").alias("workcode_spec"),
+        pl.lit("WT06/WT20 coalesce").alias("weight_spec"),
+    ])
+
+    # Join ATUS measures into CPS micro for projection inputs and compute weights for RH/IP
+    cps_mi = cps_mi.join(
+        atus_cell.select(["YEAR", "cell_id", "p_RH_workday"]),
+        on=["YEAR", "cell_id"], how="left"
+    )
+    # Polars will suffix duplicate right columns (e.g., p_RH_workday_right). Coalesce to a single column.
+    cps_mi = cps_mi.with_columns([
+        pl.coalesce([
+            pl.col("p_RH_workday_right").cast(pl.Float64, strict=False),
+            pl.col("p_RH_workday").cast(pl.Float64, strict=False),
+        ]).alias("_p_rh_workday")
+    ]).drop(["p_RH_workday_right"], strict=False)
+    cps_mi = cps_mi.with_columns([
+        pl.col("_p_rh_workday").alias("p_RH_workday"),
+        (pl.col("cps_weight") * pl.col("_p_rh_workday")).alias("w_RH"),
+        (pl.col("cps_weight") * (1 - pl.col("_p_rh_workday"))).alias("w_IP"),
+    ]).drop(["_p_rh_workday"], strict=False)
+
+    # 4) Optional bridge lambdas for 2022–2025
+    bridge = None
+    if produce_bridge:
+        eps = 1e-6
+        # CPS worker shares and weight mass by cell×year (post-2021)
+        bycell = (
+            cps_obs.group_by(["YEAR", "cell_id"]).agg([
+                (pl.col("FULL_REMOTE") * pl.col("cps_weight")).sum().alias("sum_full_remote"),
+                (pl.col("HYBRID") * pl.col("cps_weight")).sum().alias("sum_hybrid"),
+                (pl.col("FULL_INPERSON") * pl.col("cps_weight")).sum().alias("sum_full_inperson"),
+                pl.col("cps_weight").sum().alias("cps_w"),
+            ])
+            .with_columns([
+                (pl.col("sum_full_remote") / pl.col("cps_w")).alias("worker_share_remote"),
+                (pl.col("sum_hybrid") / pl.col("cps_w")).alias("worker_share_hybrid"),
+                (pl.col("sum_full_inperson") / pl.col("cps_w")).alias("worker_share_inperson"),
+            ])
+            .drop(["sum_full_remote", "sum_hybrid", "sum_full_inperson"], strict=False)
+        )
+        # ATUS day shares pooled over 2022–2024, then mapped to each CPS YEAR cell (stabilizes small cells)
+        atus_pool = (
+            atus_cell
+            .filter((pl.col("YEAR") >= 2022) & (pl.col("YEAR") <= 2024))
+            .with_columns([
+                (pl.col("share_remote_day") * pl.col("N_diaries")).alias("num_r"),
+                (pl.col("share_hybrid_day") * pl.col("N_diaries")).alias("num_h"),
+                (pl.col("share_inperson_day") * pl.col("N_diaries")).alias("num_i"),
+            ])
+            .group_by(["cell_id"]).agg([
+                pl.col("num_r").sum().alias("sum_num_r"),
+                pl.col("num_h").sum().alias("sum_num_h"),
+                pl.col("num_i").sum().alias("sum_num_i"),
+                pl.col("N_diaries").sum().alias("sum_diaries"),
+                pl.col("n_eff_diaries").sum().alias("sum_n_eff_diaries"),
+            ])
+            .with_columns([
+                pl.when(pl.col("sum_diaries") > 0).then(pl.col("sum_num_r") / pl.col("sum_diaries")).otherwise(pl.lit(None)).alias("share_remote_day"),
+                pl.when(pl.col("sum_diaries") > 0).then(pl.col("sum_num_h") / pl.col("sum_diaries")).otherwise(pl.lit(None)).alias("share_hybrid_day"),
+                pl.when(pl.col("sum_diaries") > 0).then(pl.col("sum_num_i") / pl.col("sum_diaries")).otherwise(pl.lit(None)).alias("share_inperson_day"),
+            ])
+            .with_columns([
+                (pl.col("share_remote_day") + pl.col("share_hybrid_day") + pl.col("share_inperson_day")).alias("sum_day"),
+            ])
+            .with_columns([
+                pl.when(pl.col("sum_day") > 0)
+                  .then(pl.col("share_remote_day") / pl.col("sum_day"))
+                  .otherwise(pl.col("share_remote_day")).alias("share_remote_day"),
+                pl.when(pl.col("sum_day") > 0)
+                  .then(pl.col("share_hybrid_day") / pl.col("sum_day"))
+                  .otherwise(pl.col("share_hybrid_day")).alias("share_hybrid_day"),
+                pl.when(pl.col("sum_day") > 0)
+                  .then(pl.col("share_inperson_day") / pl.col("sum_day"))
+                  .otherwise(pl.col("share_inperson_day")).alias("share_inperson_day"),
+            ])
+            .drop(["sum_day", "sum_num_r", "sum_num_h", "sum_num_i"], strict=False)
+        )
+        # Map pooled shares onto CPS bycell YEAR×cell_id keys
+        atus_bycell = (
+            bycell.select(["YEAR", "cell_id"]).unique()
+            .join(atus_pool, on=["cell_id"], how="left")
+            .rename({"sum_diaries":"N_diaries", "sum_n_eff_diaries":"n_eff_diaries"})
+        )
+        # Small additive smoothing to avoid exact zeros; re-normalize
+        tau = 1e-4
+        atus_bycell = (
+            atus_bycell
+            .with_columns([
+                (pl.col("share_remote_day") + tau).alias("sr"),
+                (pl.col("share_hybrid_day") + tau).alias("sh"),
+                (pl.col("share_inperson_day") + tau).alias("si"),
+            ])
+            .with_columns([(pl.col("sr") + pl.col("sh") + pl.col("si")).alias("sum_smooth")])
+            .with_columns([
+                (pl.col("sr") / pl.col("sum_smooth")).alias("share_remote_day"),
+                (pl.col("sh") / pl.col("sum_smooth")).alias("share_hybrid_day"),
+                (pl.col("si") / pl.col("sum_smooth")).alias("share_inperson_day"),
+            ])
+            .drop(["sum_smooth", "sum_num_r", "sum_num_h", "sum_num_i"], strict=False)
+        )
+        # Inner join so both sides agree on cell×year
+        bridge0 = bycell.join(atus_bycell, on=["YEAR", "cell_id"], how="inner")
+        # Guardrails: drop low-support cells (ATUS diaries and CPS mass)
+        N_min = 10
+        bridge0 = bridge0.filter((pl.col("n_eff_diaries") >= N_min) | pl.col("n_eff_diaries").is_null())
+        # Compute p01 from CPS bycell to avoid post-join bias
+        cps_p01 = bycell.group_by("YEAR").agg(pl.col("cps_w").quantile(0.01, "nearest").alias("cps_w_p01"))
+        bridge0 = bridge0.join(cps_p01, on="YEAR", how="left").filter(pl.col("cps_w") >= pl.col("cps_w_p01")).drop("cps_w_p01")
+
+        # Parse cell components for shrinkage strata
+        parts = pl.col("cell_id").cast(pl.Utf8).str.split_exact("|", 5)
+        bridge0 = bridge0.with_columns([
+            parts.struct.field("field_0").alias("occ2"),
+            parts.struct.field("field_1").alias("ind_broad"),
+            parts.struct.field("field_2").alias("ftpt"),
+            parts.struct.field("field_3").alias("edu3"),
+            parts.struct.field("field_4").alias("age4"),
+            parts.struct.field("field_5").alias("sex"),
+        ])
+
+        # Safe division lambdas
+        bridge0 = bridge0.with_columns([
+            pl.when(pl.col("share_remote_day") < eps)
+                .then(pl.when(pl.col("worker_share_remote") < eps).then(pl.lit(1.0)).otherwise(None))
+                .otherwise(pl.col("worker_share_remote") / pl.col("share_remote_day")).alias("lambda_remote_raw"),
+            pl.when(pl.col("share_hybrid_day") < eps)
+                .then(pl.when(pl.col("worker_share_hybrid") < eps).then(pl.lit(1.0)).otherwise(None))
+                .otherwise(pl.col("worker_share_hybrid") / pl.col("share_hybrid_day")).alias("lambda_hybrid_raw"),
+            pl.when(pl.col("share_inperson_day") < eps)
+                .then(pl.when(pl.col("worker_share_inperson") < eps).then(pl.lit(1.0)).otherwise(None))
+                .otherwise(pl.col("worker_share_inperson") / pl.col("share_inperson_day")).alias("lambda_inperson_raw"),
+        ])
+
+        # Shrinkage ladder medians
+        def medians(df: pl.DataFrame, keys: list[str], suffix: str) -> pl.DataFrame:
+            return df.group_by(keys).agg([
+                pl.col("lambda_remote").median().alias(f"lambda_remote_med_{suffix}"),
+                pl.col("lambda_hybrid").median().alias(f"lambda_hybrid_med_{suffix}"),
+                pl.col("lambda_inperson").median().alias(f"lambda_inperson_med_{suffix}"),
+            ])
+
+        med_year_ge   = medians(bridge0, ["YEAR", "occ2", "edu3"], "y_ge")
+        med_pooled_ge = medians(bridge0, ["occ2", "edu3"], "ge")
+        med_year_o    = medians(bridge0, ["YEAR", "occ2"], "y_o")
+        med_pooled_o  = medians(bridge0, ["occ2"], "o")
+        bridge0 = bridge0.with_columns(pl.lit(1).alias("ONE"))
+        med_global = bridge0.group_by("ONE").agg([
+            pl.col("lambda_remote").median().alias("lambda_remote_med_g"),
+            pl.col("lambda_hybrid").median().alias("lambda_hybrid_med_g"),
+            pl.col("lambda_inperson").median().alias("lambda_inperson_med_g"),
+        ])
+
+        bridge = (
+            bridge0
+            .join(med_year_ge, on=["YEAR", "occ2", "edu3"], how="left")
+            .join(med_pooled_ge, on=["occ2", "edu3"], how="left")
+            .join(med_year_o, on=["YEAR", "occ2"], how="left")
+            .join(med_pooled_o, on=["occ2"], how="left")
+            .join(med_global, on="ONE", how="left")
+            .with_columns([
+                pl.coalesce([
+                    pl.col("lambda_remote_raw"),
+                    pl.col("lambda_remote_med_ge"), pl.col("lambda_remote_med_o"), pl.col("lambda_remote_med_g"),
+                    pl.col("lambda_remote_med_y_ge"), pl.col("lambda_remote_med_y_o"),
+                ]).clip(0.20, 5.0).alias("lambda_remote"),
+                pl.coalesce([
+                    pl.col("lambda_hybrid_raw"),
+                    pl.col("lambda_hybrid_med_ge"), pl.col("lambda_hybrid_med_o"), pl.col("lambda_hybrid_med_g"),
+                    pl.col("lambda_hybrid_med_y_ge"), pl.col("lambda_hybrid_med_y_o"),
+                ]).clip(0.20, 5.0).alias("lambda_hybrid"),
+                pl.coalesce([
+                    pl.col("lambda_inperson_raw"),
+                    pl.col("lambda_inperson_med_ge"), pl.col("lambda_inperson_med_o"), pl.col("lambda_inperson_med_g"),
+                    pl.col("lambda_inperson_med_y_ge"), pl.col("lambda_inperson_med_y_o"),
+                ]).clip(0.20, 5.0).alias("lambda_inperson"),
+            ])
+            .with_columns([
+                (pl.col("lambda_remote") * pl.col("share_remote_day") +
+                 pl.col("lambda_hybrid") * pl.col("share_hybrid_day") +
+                 pl.col("lambda_inperson") * pl.col("share_inperson_day")).alias("denom"),
+            ])
+            .with_columns([
+                pl.when(pl.col("denom") > 0)
+                  .then((pl.col("lambda_remote") * pl.col("share_remote_day")) / pl.col("denom"))
+                  .otherwise(pl.lit(None)).alias("share_remote_day_scaled"),
+                pl.when(pl.col("denom") > 0)
+                  .then((pl.col("lambda_hybrid") * pl.col("share_hybrid_day")) / pl.col("denom"))
+                  .otherwise(pl.lit(None)).alias("share_hybrid_day_scaled"),
+                pl.when(pl.col("denom") > 0)
+                  .then((pl.col("lambda_inperson") * pl.col("share_inperson_day")) / pl.col("denom"))
+                  .otherwise(pl.lit(None)).alias("share_inperson_day_scaled"),
+            ])
+            .drop([
+                "ONE","lambda_remote_med_y_ge","lambda_hybrid_med_y_ge","lambda_inperson_med_y_ge",
+                "lambda_remote_med_ge","lambda_hybrid_med_ge","lambda_inperson_med_ge",
+                "lambda_remote_med_y_o","lambda_hybrid_med_y_o","lambda_inperson_med_y_o",
+                "lambda_remote_med_o","lambda_hybrid_med_o","lambda_inperson_med_o",
+                "lambda_remote_med_g","lambda_hybrid_med_g","lambda_inperson_med_g",
+                "lambda_remote_raw","lambda_hybrid_raw","lambda_inperson_raw","denom"
+            ], strict=False)
+        )
+
+    # Export paths
+    out_dir = (cfg.processed_dir / "empirical").resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_paths = {
+        "cps_mi_ready": out_dir / "cps_mi_ready_2013_2025.dta",
+        "cps_observed_telework": out_dir / "cps_observed_telework_2022_2025.dta",
+        "atus_cell_measures": out_dir / "atus_cell_measures_2013_2025.dta",
+    }
+    if bridge is not None:
+        out_paths["bridge_lambda"] = out_dir / "bridge_lambda_2022_2025.dta"
+
+    # Write .dta files
+    _export_stata(cps_mi, out_paths["cps_mi_ready"])
+    _export_stata(cps_obs, out_paths["cps_observed_telework"])
+    _export_stata(atus_cell, out_paths["atus_cell_measures"])
+    if bridge is not None:
+        _export_stata(bridge, out_paths["bridge_lambda"]) 
+
+    # Optionally write schemas as JSON sidecars
+    if write_schema:
+        for k, p in out_paths.items():
+            try:
+                schema = cps_mi.schema if k.startswith("cps_mi") else (cps_obs.schema if k.startswith("cps_observed") else (bridge.schema if (bridge is not None and k.startswith("bridge")) else atus_cell.schema))
+                with open(str(p).replace(".dta", ".schema.json"), "w") as f:
+                    json.dump({"columns": list(schema.keys()), "dtypes": {c: str(t) for c, t in schema.items()}}, f, indent=2)
+            except Exception:
+                pass
+
+    # Sanity checks
+    try:
+        # 1) Pre-2022 coverage of CPS weight with valid cell_id and p_RH_workday
+        pre = cps_mi.filter(pl.col("YEAR") < 2022)
+        tot_w = pre.select(pl.col("cps_weight").sum().alias("w")).item(0, 0) if len(pre) else 0
+        ok_w = pre.filter(pl.col("cell_id").is_not_null() & pl.col("p_RH_workday").is_not_null()) \
+                 .select(pl.col("cps_weight").sum().alias("w")).item(0, 0) if len(pre) else 0
+        share_ok = (ok_w / tot_w) if tot_w else float("nan")
+        logger.info(f"Sanity: Pre-2022 CPS weight coverage with valid cell_id & p_RH_workday = {share_ok:.3%} (target >= 90%)")
+
+        # 2) ind_broad missing rate
+        miss_rate = cps_mi.select((pl.col("ind_broad").is_null()).cast(pl.Float64).mean()).item(0, 0)
+        logger.info(f"Sanity: ind_broad missing share in CPS_mi = {miss_rate:.3%}")
+
+        # 3) Lambda centering (2022–2025) by OCC2×IND (if bridge exists)
+        if produce_bridge and bridge is not None and len(bridge) > 0:
+            # No inf/NaN lambdas
+            bad_counts = bridge.select([
+                pl.col("lambda_remote").is_finite().alias("r_ok"),
+                pl.col("lambda_hybrid").is_finite().alias("h_ok"),
+                pl.col("lambda_inperson").is_finite().alias("i_ok"),
+            ]).select([
+                (~pl.col("r_ok")).sum().alias("bad_r"),
+                (~pl.col("h_ok")).sum().alias("bad_h"),
+                (~pl.col("i_ok")).sum().alias("bad_i"),
+            ])
+            logger.info(f"Sanity: lambda bad counts (remote/hybrid/inperson) = {bad_counts.to_dict(as_series=False)}")
+
+            by_group = bridge.group_by(["occ2", "ind_broad"]).agg([
+                pl.col("lambda_remote").median().alias("med_r"),
+                pl.col("lambda_hybrid").median().alias("med_h"),
+                pl.col("lambda_inperson").median().alias("med_i"),
+            ])
+            med_overall = bridge.select([
+                pl.col("lambda_remote").median().alias("med_r"),
+                pl.col("lambda_hybrid").median().alias("med_h"),
+                pl.col("lambda_inperson").median().alias("med_i"),
+            ])
+            logger.info(f"Sanity: Overall median lambdas (r,h,i) = {med_overall.to_dict(as_series=False)}")
+    except Exception as e:
+        logger.warning(f"Sanity checks failed: {e}")
+
+    logger.info("Pre-estimation artifacts written:")
+    for k, p in out_paths.items():
+        logger.info(f" - {k}: {p}")
+    # Sanity checks
+    try:
+        # 1) Pre-2022 coverage of cell_id and p_RH_workday by weight
+        pre = cps_mi.filter(pl.col("YEAR") < 2022)
+        denom = pre.select(pl.col("cps_weight").sum()).item() or 0.0
+        numer = pre.filter(pl.col("cell_id").is_not_null() & pl.col("p_RH_workday").is_not_null()) \
+                   .select(pl.col("cps_weight").sum()).item() or 0.0
+        share = (numer / denom) if denom > 0 else None
+        if share is not None:
+            logger.info(f"Sanity: pre-2022 weight share with non-missing cell_id & p_RH_workday = {share:.3%} (target ≥ 90%)")
+        else:
+            logger.info("Sanity: pre-2022 coverage unavailable (denominator=0)")
+
+        # 2) ind_broad availability
+        ind_nonnull = cps_mi.select((pl.col("ind_broad").is_not_null()).mean()).item()
+        logger.info(f"Sanity: share of CPS rows with ind_broad non-missing = {ind_nonnull:.3%}")
+
+        # 3) Lambda centering (2022–2025), within occ2×ind_broad
+        if produce_bridge and ("bridge_lambda" in out_paths):
+            # Read back bridge or use in-memory 'bridge'
+            b2 = bridge
+            cell_meta = cps_obs.select(["cell_id", "occ2_harmonized", "ind_broad"]).unique()
+            b2 = b2.join(cell_meta, on="cell_id", how="left")
+            grp = ["occ2_harmonized", "ind_broad"]
+            lambdas = (
+                b2.group_by(grp)
+                  .agg([
+                      pl.col("lambda_remote").median().alias("med_lambda_remote"),
+                      pl.col("lambda_hybrid").median().alias("med_lambda_hybrid"),
+                      pl.col("lambda_inperson").median().alias("med_lambda_inperson"),
+                  ])
+            )
+            # Overall medians across groups
+            med_remote = lambdas.select(pl.col("med_lambda_remote").drop_nulls().median()).item()
+            med_hybrid = lambdas.select(pl.col("med_lambda_hybrid").drop_nulls().median()).item()
+            med_inpers = lambdas.select(pl.col("med_lambda_inperson").drop_nulls().median()).item()
+            if med_remote is None:
+                med_remote = float("nan")
+            if med_hybrid is None:
+                med_hybrid = float("nan")
+            if med_inpers is None:
+                med_inpers = float("nan")
+            logger.info(f"Sanity: median λ across occ2×ind_broad — remote={med_remote:.3f}, hybrid={med_hybrid:.3f}, inperson={med_inpers:.3f} (expect ~1)")
+        else:
+            logger.info("Sanity: bridge not produced; skipping λ centering check.")
+    except Exception as e:
+        logger.warning(f"Sanity checks failed: {e}")
+    return out_paths
+
 def main() -> None:
     cfg = load_config()
+    # Run base pipelines if needed
     atus_link = atus_pipeline(cfg)
-    print(f"ATUS link written: {atus_link}")
-    # acs_out = acs_pipeline(cfg)
-    # print(f"ACS processed written: {acs_out}")
+    # print(f"ATUS link written: {atus_link}")
     cps_out = cps_pipeline(cfg)
-    print(f"CPS processed written: {cps_out}")
-
+    # print(f"CPS processed written: {cps_out}")
+    # Build Stata-ready artifacts
+    pre_paths = preestimation_procedure(cfg)
+    # print("Pre-estimation artifacts:")
+    # for k, p in pre_paths.items():
+        # print(f"  {k}: {p}")
 
 if __name__ == "__main__":
     main()
