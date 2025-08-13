@@ -1,0 +1,52 @@
+ModelConfig:
+  ModelFunctions:
+    MatchingFunction:
+      type: CESMatching
+      params:
+        gamma: 0.5
+    ProductionFunction:
+      constant: 0.0
+      ProductivityComponent:
+        type: LinearProductivity
+        params:
+          A0: 0.0
+          A1: 1.0
+      RemoteEfficiencyComponent:
+        type: LinearFirmLogWorker
+        params:
+          nu: 1.0
+          phi: 0.94589753
+          psi0: -0.33411015
+    UtilityFunction:
+      type: PolySeparable
+      params:
+        a0: 0.0
+        a1: 1.0
+        eta_w: 1.0
+        c0: 0.233925
+        c1: 0.0
+        eta_h: 1.0
+        chi: 2.5
+  ModelParameters:
+    kappa0: 1.0
+    kappa1: 1.0
+    kappa2: 1.0
+    beta: 0.996
+    delta_bar: 0.035
+    b: 0.4
+    xi: 0.5
+    A1/c0_estimated: 0.17971847
+  ModelGrids:
+    RemoteProductivityGrid:
+      n_psi: 101
+      data_file: /Users/mitchv34/Work/WFH/data/results/psi_distribution_Pre_COVID.csv
+      data_column: psi
+      weight_column: probability_mass
+    SkillGrid:
+      n_h: 70
+      data_file: /Users/mitchv34/Work/WFH/data/results/h_distribution_Pre_COVID.csv
+      data_column: h
+      weight_column: probability_mass
+    UtilityGrid:
+      n_x: 100
+      x_size: 50.0
