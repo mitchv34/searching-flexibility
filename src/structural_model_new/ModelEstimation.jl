@@ -134,232 +134,268 @@ Returns:
 - ratio_var_logwage_high_lowpsi: var_high / var_low (0.0 if var_low==0)
 - market_tightness: θ (market tightness)
 """
-function compute_model_moments(
-                                prim::Primitives, res::Results;
-                                # Quantile cutoffs (defaults: bottom/top quartiles)
-                                q_low_cut=0.25, q_high_cut=0.75
-                                )
-    n = res.n
-    w = res.w_policy
-    α = res.α_policy
+
+
+"""
+    compute_model_moments(prim::Primitives, res::Results; q_low_cut=0.25, q_high_cut=0.75) -> NamedTuple{(:mean_logwage, :var_logwage, :mean_logwage_inperson, :mean_logwage_remote, :diff_logwage_inperson_remote, :hybrid_share, :agg_productivity, :dlogw_dpsi_mean_RH, :mean_logwage_RH_lowpsi, :mean_logwage_RH_highpsi, :diff_logwage_RH_high_lowpsi, :mean_alpha_highpsi, :mean_alpha_lowpsi, :diff_alpha_high_lowpsi, :var_logwage_highpsi, :var_logwage_lowpsi, :ratio_var_logwage_high_lowpsi, :market_tightness), NTuple{18, Float64}}
+
+Compute model-implied moments from the steady-state cross-section of employed workers.
+
+## Economic Interpretation:
+- **Log wage moments**: Capture wage dispersion and sorting patterns across worker-firm matches
+- **Work arrangement moments**: Measure remote/hybrid adoption and its wage premium/penalty
+- **Firm productivity grouping**: Tests model's predictions about high-ψ vs low-ψ firm behavior
+- **Derivative moment**: Captures wage-productivity elasticity among flexible arrangements
+
+## Returns:
+Comprehensive set of theoretical moments for structural estimation, including unconditional
+wage statistics, conditional moments by work arrangement and firm type, and market aggregates.
+"""
+function compute_model_moments_opt(
+    prim::Primitives, 
+    res::Results;
+    q_low_cut::Float64=0.25, 
+    q_high_cut::Float64=0.75
+)::NamedTuple{(:mean_logwage, :var_logwage, :mean_logwage_inperson, :mean_logwage_remote, 
+              :diff_logwage_inperson_remote, :hybrid_share, :agg_productivity, :dlogw_dpsi_mean_RH, 
+              :mean_logwage_RH_lowpsi, :mean_logwage_RH_highpsi, :diff_logwage_RH_high_lowpsi, 
+              :mean_alpha_highpsi, :mean_alpha_lowpsi, :diff_alpha_high_lowpsi, 
+              :var_logwage_highpsi, :var_logwage_lowpsi, :ratio_var_logwage_high_lowpsi, 
+              :market_tightness), NTuple{18, Float64}}
+
+    # Extract key objects
+    n::Matrix{Float64} = res.n           # Employment distribution n(h,ψ) 
+    w::Matrix{Float64} = res.w_policy    # Equilibrium wages w*(h,ψ)
+    α::Matrix{Float64} = res.α_policy    # Optimal work arrangements α*(h,ψ)
+    
     @unpack h_grid, ψ_grid, ψ_cdf, production_fun, A₁, ψ₀, ϕ, ν, χ, ξ, β, δ = prim
 
-    total_emp = sum(n)
+    total_emp::Float64 = sum(n)
+    
+    # Early return for degenerate case
     if !(total_emp > 0)
-        return (
-            mean_logwage = 0.0,
-            var_logwage = 0.0,
-            mean_logwage_inperson = 0.0,
-            mean_logwage_remote = 0.0,
-            diff_logwage_inperson_remote = 0.0,
-            hybrid_share = 0.0,
-            agg_productivity = 0.0,
-            dlogw_dpsi_mean_RH = 0.0,
-            mean_logwage_RH_lowpsi = 0.0,
-            mean_logwage_RH_highpsi = 0.0,
-            diff_logwage_RH_high_lowpsi = 0.0,
-            mean_alpha_highpsi = 0.0,
-            mean_alpha_lowpsi = 0.0,
-            diff_alpha_high_lowpsi = 0.0,
-            var_logwage_highpsi = 0.0,
-            var_logwage_lowpsi = 0.0,
-            ratio_var_logwage_high_lowpsi = 0.0,
-            market_tightness = res.θ,
-        )
+        return _zero_moments(res.θ)
     end
 
-    # Mask to avoid log of non-positive wages and zero-weight cells
-    valid = (n .> 0.0) .& (w .> 0.0)
+    # Pre-compute masks and tolerance
+    αtol::Float64 = 1e-8
+    valid::BitMatrix = (n .> 0.0) .& (w .> 0.0)
+    
+    # Determine ψ quantile boundaries for firm type grouping
+    n_ψ::Int = length(ψ_grid)
+    idx_low_end::Int = _find_quantile_index(ψ_cdf, q_low_cut, n_ψ)
+    idx_high_start::Int = max(_find_quantile_index(ψ_cdf, q_high_cut, n_ψ), idx_low_end + 1)
 
-    # Unconditional mean/variance of log wages across employed
-    if any(valid)
-        logw_all = log.(w[valid])
-        wts_all  = n[valid]
-        wts_all_norm = wts_all ./ sum(wts_all)
-        μ = sum(logw_all .* wts_all_norm)
-        σ2 = sum(((logw_all .- μ).^2) .* wts_all_norm)
-    else
-        μ = 0.0; σ2 = 0.0
-    end
+    # Initialize all accumulators for single-pass computation
+    # Unconditional wage moments
+    sum_wts::Float64 = 0.0
+    sum_logw::Float64 = 0.0
+    sum_logw2::Float64 = 0.0
+    
+    # Work arrangement conditional moments  
+    sum_n_inperson::Float64 = 0.0; sum_logw_inperson::Float64 = 0.0
+    sum_n_remote::Float64 = 0.0; sum_logw_remote::Float64 = 0.0
+    sum_n_interior::Float64 = 0.0  # Hybrid workers (0 < α* < 1)
+    
+    # Productivity moment
+    sum_production::Float64 = 0.0
+    
+    # Wage-productivity elasticity among remote/hybrid workers
+    # Economic interpretation: ∂log(w)/∂ψ measures how responsive wages are to firm 
+    # productivity improvements, conditional on offering flexible work arrangements
+    sum_dlogw_dpsi_RH::Float64 = 0.0
+    sum_n_RH::Float64 = 0.0
+    
+    # ψ-group conditional moments (for first-stage estimation)
+    # Low-ψ firms (bottom quantile)
+    sum_n_low::Float64 = 0.0; sum_alpha_low::Float64 = 0.0
+    sum_logw_low::Float64 = 0.0; sum_logw2_low::Float64 = 0.0
+    sum_logw_RH_low::Float64 = 0.0; sum_n_RH_low::Float64 = 0.0
+    
+    # High-ψ firms (top quantile) 
+    sum_n_high::Float64 = 0.0; sum_alpha_high::Float64 = 0.0
+    sum_logw_high::Float64 = 0.0; sum_logw2_high::Float64 = 0.0
+    sum_logw_RH_high::Float64 = 0.0; sum_n_RH_high::Float64 = 0.0
 
-    # Conditional by α* groups
-    αtol = 1e-8
-    mask_inperson = valid .& (α .<= αtol)
-    mask_remote   = valid .& (α .>= 1.0 - αtol)
-    mask_interior = (α .> αtol) .& (α .< 1.0 - αtol)
+    # Single pass through all (h,ψ) combinations
+    for (i_h, h) in enumerate(h_grid)
+        for (i_ψ, ψ) in enumerate(ψ_grid)
+            n_cell::Float64 = n[i_h, i_ψ]
+            
+            # Skip zero-employment cells
+            n_cell > 0.0 || continue
+            
+            w_cell::Float64 = w[i_h, i_ψ]
+            α_cell::Float64 = α[i_h, i_ψ]
+            
+            # Determine cell characteristics
+            is_valid::Bool = valid[i_h, i_ψ]  # Positive wage
+            is_inperson::Bool = α_cell <= αtol
+            is_remote::Bool = α_cell >= (1.0 - αtol) 
+            is_interior::Bool = (α_cell > αtol) && (α_cell < (1.0 - αtol))
+            is_RH::Bool = α_cell > αtol  # Remote or hybrid
+            is_low_psi::Bool = i_ψ <= idx_low_end
+            is_high_psi::Bool = i_ψ >= idx_high_start
 
-    function cond_mean(mask)
-        if any(mask)
-            logw = log.(w[mask])
-            wts  = n[mask]
-            s = sum(wts)
-            if s > 0
-                wtsn = wts ./ s
-                return sum(logw .* wtsn)
+            # Aggregate productivity (all employed workers)
+            sum_production += production_fun(h, ψ, α_cell) * n_cell
+            
+            # Skip wage-based moments if wage is non-positive
+            if !is_valid
+                # Still accumulate α moments and employment counts
+                if is_low_psi
+                    sum_n_low += n_cell
+                    sum_alpha_low += α_cell * n_cell
+                end
+                if is_high_psi
+                    sum_n_high += n_cell
+                    sum_alpha_high += α_cell * n_cell
+                end
+                if is_interior
+                    sum_n_interior += n_cell
+                end
+                continue
             end
-        end
-        return 0.0
-    end
-
-    μ_inperson = cond_mean(mask_inperson)
-    μ_remote   = cond_mean(mask_remote)
-    diff_ir    = μ_inperson - μ_remote
-
-    # Hybrid share as fraction of total employment
-    hybrid_share = sum(n[mask_interior]) / total_emp
-
-    # Aggregate productivity E[Y]
-    EY = 0.0
-    if total_emp > 0
-        acc = 0.0
-        for (i_h, h) in enumerate(h_grid)
-            for (i_ψ, ψ) in enumerate(ψ_grid)
-                acc += production_fun(h, ψ, α[i_h, i_ψ]) * n[i_h, i_ψ]
+            
+            logw_cell::Float64 = log(w_cell)
+            
+            # Unconditional wage moments (all valid employed workers)
+            sum_wts += n_cell
+            sum_logw += logw_cell * n_cell
+            sum_logw2 += (logw_cell^2) * n_cell
+            
+            # Work arrangement conditional moments
+            if is_inperson
+                sum_n_inperson += n_cell
+                sum_logw_inperson += logw_cell * n_cell
+            elseif is_remote
+                sum_n_remote += n_cell  
+                sum_logw_remote += logw_cell * n_cell
             end
-        end
-        EY = acc / total_emp
-    end
-
-    # Derivative-based moment over S_RH (α*>0)
-    mask_RH = valid .& (α .> αtol)
-    dlogw_dpsi_mean_RH = 0.0
-    denom_RH = sum(n[mask_RH])
-    if denom_RH > 0
-        # Compute ∂g/∂ψ and ∂w/∂ψ using provided formula
-        acc = 0.0
-        for (i_h, h) in enumerate(h_grid)
-            for (i_ψ, ψ) in enumerate(ψ_grid)
-                if mask_RH[i_h, i_ψ]
-                    g_psi = ψ₀ * (h^ϕ) * (ν * ψ^(ν - 1))
-                    α_star = α[i_h, i_ψ]
-                    dw_dpsi = A₁ * h * g_psi * ( (ξ * α_star) / (1.0 - β * (1.0 - δ)) - (1.0 - α_star) / χ )
-                    acc += (dw_dpsi / w[i_h, i_ψ]) * n[i_h, i_ψ]
+            
+            if is_interior
+                sum_n_interior += n_cell
+            end
+            
+            # Remote/hybrid wage-productivity elasticity
+            # Economic model: ∂w*/∂ψ = A₁h(∂g/∂ψ)[ξα*/(1-β(1-δ)) - (1-α*)/χ]
+            # This captures how wage responds to firm productivity for flexible arrangements
+            if is_RH
+                # Marginal productivity of firm type: ∂g/∂ψ where g(h,ψ) = ψ₀h^ϕψ^ν
+                dg_dpsi::Float64 = ψ₀ * (h^ϕ) * (ν * ψ^(ν - 1))
+                
+                # Wage derivative incorporating Nash bargaining and arrangement costs
+                # First term: remote productivity advantage (ξ = remote productivity factor)
+                # Second term: arrangement cost savings (χ = cost elasticity parameter)
+                dw_dpsi::Float64 = A₁ * h * dg_dpsi * (
+                    (ξ * α_cell) / (1.0 - β * (1.0 - δ)) - (1.0 - α_cell) / χ
+                )
+                
+                sum_dlogw_dpsi_RH += (dw_dpsi / w_cell) * n_cell
+                sum_n_RH += n_cell
+            end
+            
+            # ψ-group moments (for identification of firm heterogeneity effects)
+            if is_low_psi
+                sum_n_low += n_cell
+                sum_alpha_low += α_cell * n_cell
+                sum_logw_low += logw_cell * n_cell
+                sum_logw2_low += (logw_cell^2) * n_cell
+                
+                if is_RH
+                    sum_logw_RH_low += logw_cell * n_cell
+                    sum_n_RH_low += n_cell
+                end
+            end
+            
+            if is_high_psi
+                sum_n_high += n_cell
+                sum_alpha_high += α_cell * n_cell
+                sum_logw_high += logw_cell * n_cell
+                sum_logw2_high += (logw_cell^2) * n_cell
+                
+                if is_RH
+                    sum_logw_RH_high += logw_cell * n_cell
+                    sum_n_RH_high += n_cell
                 end
             end
         end
-        dlogw_dpsi_mean_RH = acc / denom_RH
     end
 
-    # First-stage (theoretical) high-vs-low ψ moment among remote/hybrid (α*>0)
-    # Find index boundaries on the ψ grid using the ψ CDF
-    n_ψ = length(ψ_grid)
-    # Low group: indices with CDF ≤ q_low_cut
-    idx_low_end = begin
-        idx = findfirst(>=(q_low_cut), ψ_cdf)
-        idx === nothing ? n_ψ : idx
-    end
-    # High group: indices with CDF ≥ q_high_cut
-    idx_high_start = begin
-        idx = findfirst(>=(q_high_cut), ψ_cdf)
-        idx === nothing ? n_ψ : idx
-    end
-    # Ensure disjoint groups (optional): shift high start if overlapping
-    if idx_high_start <= idx_low_end
-        idx_high_start = min(idx_low_end + 1, n_ψ)
-    end
-
-    # Accumulate conditional expectations over n(h,ψ) restricted to α*>0 and ψ in group
-    num_low = 0.0; den_low = 0.0
-    num_high = 0.0; den_high = 0.0
-    if total_emp > 0
-        for (i_h, _) in enumerate(h_grid)
-            # Low ψ slice
-            for i_ψ in 1:idx_low_end
-                if valid[i_h, i_ψ] && α[i_h, i_ψ] > αtol
-                    num_low  += log(w[i_h, i_ψ]) * n[i_h, i_ψ]
-                    den_low  += n[i_h, i_ψ]
-                end
-            end
-            # High ψ slice
-            for i_ψ in idx_high_start:n_ψ
-                if valid[i_h, i_ψ] && α[i_h, i_ψ] > αtol
-                    num_high += log(w[i_h, i_ψ]) * n[i_h, i_ψ]
-                    den_high += n[i_h, i_ψ]
-                end
-            end
-        end
-    end
-    mean_logwage_RH_lowpsi  = den_low  > 0 ? (num_low  / den_low)  : 0.0
-    mean_logwage_RH_highpsi = den_high > 0 ? (num_high / den_high) : 0.0
-    diff_RH_high_lowpsi = mean_logwage_RH_highpsi - mean_logwage_RH_lowpsi
-
-    # Grouped α* means by ψ (no α*>0 restriction), weighted by n(h,ψ)
-    num_a_low = 0.0; den_a_low = 0.0
-    num_a_high = 0.0; den_a_high = 0.0
-    for (i_h, _) in enumerate(h_grid)
-        for i_ψ in 1:idx_low_end
-            if n[i_h, i_ψ] > 0.0
-                num_a_low += α[i_h, i_ψ] * n[i_h, i_ψ]
-                den_a_low += n[i_h, i_ψ]
-            end
-        end
-        for i_ψ in idx_high_start:n_ψ
-            if n[i_h, i_ψ] > 0.0
-                num_a_high += α[i_h, i_ψ] * n[i_h, i_ψ]
-                den_a_high += n[i_h, i_ψ]
-            end
-        end
-    end
-    mean_alpha_lowpsi  = den_a_low  > 0 ? (num_a_low  / den_a_low)  : 0.0
-    mean_alpha_highpsi = den_a_high > 0 ? (num_a_high / den_a_high) : 0.0
-    diff_alpha_high_lowpsi = mean_alpha_highpsi - mean_alpha_lowpsi
-
-    # Conditional variances of log wages by ψ group (no α restriction), weighted by n
-    sum_n_low = 0.0; sum_logw_low = 0.0; sum_logw2_low = 0.0
-    sum_n_high = 0.0; sum_logw_high = 0.0; sum_logw2_high = 0.0
-    for (i_h, _) in enumerate(h_grid)
-        for i_ψ in 1:idx_low_end
-            if valid[i_h, i_ψ]
-                lw = log(w[i_h, i_ψ])
-                wt = n[i_h, i_ψ]
-                sum_n_low += wt
-                sum_logw_low += lw * wt
-                sum_logw2_low += (lw^2) * wt
-            end
-        end
-        for i_ψ in idx_high_start:n_ψ
-            if valid[i_h, i_ψ]
-                lw = log(w[i_h, i_ψ])
-                wt = n[i_h, i_ψ]
-                sum_n_high += wt
-                sum_logw_high += lw * wt
-                sum_logw2_high += (lw^2) * wt
-            end
-        end
-    end
-    var_logwage_lowpsi = 0.0
-    var_logwage_highpsi = 0.0
-    if sum_n_low > 0
-        μL = sum_logw_low / sum_n_low
-        var_logwage_lowpsi = max(0.0, (sum_logw2_low / sum_n_low) - μL^2)
-    end
-    if sum_n_high > 0
-        μH = sum_logw_high / sum_n_high
-        var_logwage_highpsi = max(0.0, (sum_logw2_high / sum_n_high) - μH^2)
-    end
-    ratio_var_logwage_high_lowpsi = (var_logwage_lowpsi > 0) ? (var_logwage_highpsi / var_logwage_lowpsi) : 0.0
+    # Compute final moments with numerical safeguards
+    mean_logwage::Float64, var_logwage::Float64 = _compute_mean_var(sum_logw, sum_logw2, sum_wts)
+    
+    mean_logwage_inperson::Float64 = sum_n_inperson > 0 ? sum_logw_inperson / sum_n_inperson : 0.0
+    mean_logwage_remote::Float64 = sum_n_remote > 0 ? sum_logw_remote / sum_n_remote : 0.0
+    diff_logwage_inperson_remote::Float64 = mean_logwage_inperson - mean_logwage_remote
+    
+    hybrid_share::Float64 = sum_n_interior / total_emp
+    agg_productivity::Float64 = sum_production / total_emp
+    dlogw_dpsi_mean_RH::Float64 = sum_n_RH > 0 ? sum_dlogw_dpsi_RH / sum_n_RH : 0.0
+    
+    # First-stage moments for firm heterogeneity identification
+    mean_logwage_RH_lowpsi::Float64 = sum_n_RH_low > 0 ? sum_logw_RH_low / sum_n_RH_low : 0.0
+    mean_logwage_RH_highpsi::Float64 = sum_n_RH_high > 0 ? sum_logw_RH_high / sum_n_RH_high : 0.0
+    diff_logwage_RH_high_lowpsi::Float64 = mean_logwage_RH_highpsi - mean_logwage_RH_lowpsi
+    
+    mean_alpha_lowpsi::Float64 = sum_n_low > 0 ? sum_alpha_low / sum_n_low : 0.0
+    mean_alpha_highpsi::Float64 = sum_n_high > 0 ? sum_alpha_high / sum_n_high : 0.0
+    diff_alpha_high_lowpsi::Float64 = mean_alpha_highpsi - mean_alpha_lowpsi
+    
+    _, var_logwage_lowpsi::Float64 = _compute_mean_var(sum_logw_low, sum_logw2_low, sum_n_low)
+    _, var_logwage_highpsi::Float64 = _compute_mean_var(sum_logw_high, sum_logw2_high, sum_n_high)
+    ratio_var_logwage_high_lowpsi::Float64 = var_logwage_lowpsi > 0 ? var_logwage_highpsi / var_logwage_lowpsi : 0.0
 
     return (
-        mean_logwage = μ,
-        var_logwage = σ2,
-        mean_logwage_inperson = μ_inperson,
-        mean_logwage_remote = μ_remote,
-        diff_logwage_inperson_remote = diff_ir,
+        mean_logwage = mean_logwage,
+        var_logwage = var_logwage,
+        mean_logwage_inperson = mean_logwage_inperson,
+        mean_logwage_remote = mean_logwage_remote,
+        diff_logwage_inperson_remote = diff_logwage_inperson_remote,
         hybrid_share = hybrid_share,
-        agg_productivity = EY,
+        agg_productivity = agg_productivity,
         dlogw_dpsi_mean_RH = dlogw_dpsi_mean_RH,
         mean_logwage_RH_lowpsi = mean_logwage_RH_lowpsi,
         mean_logwage_RH_highpsi = mean_logwage_RH_highpsi,
-        diff_logwage_RH_high_lowpsi = diff_RH_high_lowpsi,
+        diff_logwage_RH_high_lowpsi = diff_logwage_RH_high_lowpsi,
         mean_alpha_highpsi = mean_alpha_highpsi,
         mean_alpha_lowpsi = mean_alpha_lowpsi,
         diff_alpha_high_lowpsi = diff_alpha_high_lowpsi,
         var_logwage_highpsi = var_logwage_highpsi,
         var_logwage_lowpsi = var_logwage_lowpsi,
         ratio_var_logwage_high_lowpsi = ratio_var_logwage_high_lowpsi,
-    market_tightness = res.θ,
+        market_tightness = res.θ,
     )
 end
+
+# Helper functions for cleaner code
+function _zero_moments(θ::Float64)::NamedTuple
+    return (
+        mean_logwage = 0.0, var_logwage = 0.0, mean_logwage_inperson = 0.0,
+        mean_logwage_remote = 0.0, diff_logwage_inperson_remote = 0.0, hybrid_share = 0.0,
+        agg_productivity = 0.0, dlogw_dpsi_mean_RH = 0.0, mean_logwage_RH_lowpsi = 0.0,
+        mean_logwage_RH_highpsi = 0.0, diff_logwage_RH_high_lowpsi = 0.0, 
+        mean_alpha_highpsi = 0.0, mean_alpha_lowpsi = 0.0, diff_alpha_high_lowpsi = 0.0,
+        var_logwage_highpsi = 0.0, var_logwage_lowpsi = 0.0, 
+        ratio_var_logwage_high_lowpsi = 0.0, market_tightness = θ,
+    )
+end
+
+function _find_quantile_index(cdf::Vector{Float64}, quantile::Float64, n::Int)::Int
+    idx = findfirst(>=(quantile), cdf)
+    return idx === nothing ? n : idx
+end
+
+function _compute_mean_var(sum_x::Float64, sum_x2::Float64, sum_wts::Float64)::Tuple{Float64, Float64}
+    if sum_wts > 0
+        μ = sum_x / sum_wts
+        σ2 = max(0.0, (sum_x2 / sum_wts) - μ^2)
+        return μ, σ2
+    else
+        return 0.0, 0.0
+    end
+end
+
 """
     estimation_objective(prim, res; data_moments::NamedTuple, kwargs...)
 
