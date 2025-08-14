@@ -68,7 +68,7 @@ end
 Load the default configuration and return primitives. Useful for interactive exploration.
 """
 function load_default_config()
-    config_path = abspath(joinpath(@__DIR__, "parameters", "initial", "model_parameters.yaml"))
+    config_path = "/Users/mitchv34/Work/searching-flexibility/src/structural_model/model_parameters.yaml"
     prim, _ = Types.initializeModel(config_path)
     println("✅ Default configuration loaded")
     return prim
