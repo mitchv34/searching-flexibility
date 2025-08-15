@@ -35,6 +35,14 @@ using OptimizationOptimJL
 using ForwardDiff   
 # You may need to `] add` these if you don't have them
 
+# === Diagnostic logging controls ===
+const TRACE            = true            # master switch for objective logging
+const TRACE_FIRST      = 5               # always print the first N evaluations
+const TRACE_EVERY      = 25              # and then every N evaluations afterwards
+const TRACE_PARAMS     = true            # print parameter values when logging
+const TRACE_MOMENTS    = false           # print all moments (very verbose)
+const TRACE_KEYS       = (:market_tightness, :hybrid_share, :mean_alpha_highpsi, :mean_logwage)
+
 # -- Bring in only the requested code from the project --
 include("src/structural_model_new/ModelSetup.jl")  # Defines Primitives, Results, thresholds, etc.
 include("src/structural_model_new/ModelSolver.jl") # Defines solve_model and helpers we may reuse
@@ -139,6 +147,11 @@ function make_objective(
 
     objective = function (x::AbstractVector{<:Real})
         counter[] += 1
+        local loss::Float64
+        local model_moments_nt
+        # decide whether to log this evaluation
+        do_log = TRACE && (counter[] <= TRACE_FIRST || counter[] % TRACE_EVERY == 0)
+        t0 = time()
         
         try
         # Build updates as Float64 to avoid injecting Duals into Float64-typed Primitives
@@ -160,12 +173,57 @@ function make_objective(
 
             model_vector = [getfield(model_moments_nt, k) for k in moment_names]
             g = model_vector - data_vector
-            loss = g' * W * g
+            loss = float(g' * W * g)
+
+            # guard against NaN/Inf: return large penalty
+            if !isfinite(loss)
+                if do_log
+                    println("[obj] iter=$(counter[]) non-finite loss => return 1e20; params=", updates)
+                end
+                return 1e20
+            end
+
+            if do_log
+                dt = time() - t0
+                # basic line
+                print("[obj] iter=$(counter[]) dt=$(round(dt; digits=4))s loss=$(round(loss; digits=8))")
+                if TRACE_PARAMS
+                    print(" params=")
+                    # show ordered by param_names
+                    try
+                        pvec = [(Symbol(p), updates[Symbol(p)]) for p in param_names]
+                        print(pvec)
+                    catch
+                        print(updates)
+                    end
+                end
+                if TRACE_MOMENTS
+                    println()
+                    println("      moments: ", model_moments_nt)
+                else
+                    # peek selected keys if present
+                    try
+                        peek = Dict()
+                        for k in TRACE_KEYS
+                            if k in keys(model_moments_nt)
+                                peek[k] = getfield(model_moments_nt, k)
+                            end
+                        end
+                        println(" peek=", peek)
+                    catch
+                        println()
+                    end
+                end
+            end
 
             return loss
 
         catch e
-            println("Warning: Solver failed at iteration $(counter[]). Returning Inf. Error: ", e)
+            if do_log
+                println("[obj] iter=$(counter[]) ERROR: ", e)
+            else
+                println("Warning: Solver failed at iteration $(counter[]). Returning Inf. Error: ", e)
+            end
             return Inf
         end
     end
