@@ -76,17 +76,15 @@ function build_primitives_with_updates(
                                     )
     prim = base_prim === nothing ? create_primitives_from_yaml(yaml_path) : deepcopy(base_prim)
 
-    # --- FIX: Make the dictionary and updates type-generic ---
-    # No longer restricted to Float64. It will now accept Dual numbers from the AD.
-    upd_dict = Dict{Symbol,Any}()
+    # Force updates to Float64 to match concrete field types in Primitives
+    upd_dict = Dict{Symbol,Float64}()
     for (k, v) in updates
-        upd_dict[Symbol(k)] = v # No more `float(v)` conversion
+        upd_dict[Symbol(k)] = float(v)
     end
 
     # The rest of the function is the same...
     for (k, v) in upd_dict
         if k in fieldnames(Primitives)
-            # This will now correctly set fields to be Dual numbers during AD
             setfield!(prim, k, v)
         else
             @warn "Unknown parameter in updates ignored" k
@@ -143,14 +141,14 @@ function make_objective(
         counter[] += 1
         
         try
-            # --- FIX: Make the dictionary type-generic for AD ---
-            updates = Dict{Symbol,Any}() # Changed from Float64 to Any
+        # Build updates as Float64 to avoid injecting Duals into Float64-typed Primitives
+        updates = Dict{Symbol,Float64}()
             for (i, pname) in enumerate(param_names)
                 transform = getfield(param_map, pname)
                 if transform == :log
-                    updates[pname] = exp(x[i])
+            updates[pname] = float(exp(x[i]))
                 elseif transform == :identity
-                    updates[pname] = x[i]
+            updates[pname] = float(x[i])
                 else
                     error("Unknown transform: $transform")
                 end
@@ -216,7 +214,8 @@ function estimate_with_optim(obj, x0; lower=1e-6, upper=2.0, maxiters=50_000)
 end                                            # End of estimate_with_optim
 
 function estimate_with_sciml_lbfgs(obj, x0; lower, upper, maxiters=1000)
-    opt_func = OptimizationFunction((x, p) -> obj(x), Optimization.AutoForwardDiff())
+    # Use finite-difference gradients to keep everything Float64
+    opt_func = OptimizationFunction((x, p) -> obj(x), Optimization.AutoFiniteDiff())
     opt_prob = OptimizationProblem(opt_func, x0, lb=lower, ub=upper)
 
     result, seconds = timeit() do
