@@ -16,12 +16,10 @@ include("helpers.jl") # Lean fit_kde_psi (pure Julia)
     ψ₀::Float64
     ϕ::Float64
     ν::Float64
-    c₁::Float64
+    c₀::Float64
     χ::Float64
     γ₀::Float64
     γ₁::Float64
-    a_h::Float64   # New: parameter for h distribution
-    b_h::Float64   # New: parameter for h distribution
     #> Model functions (simple closures)
     production_fun::Function  # Production function
     utility_fun::Function     # Utility function
@@ -42,6 +40,8 @@ include("helpers.jl") # Lean fit_kde_psi (pure Julia)
     ψ_pdf::Vector{Float64}
     ψ_cdf::Vector{Float64}
     #* h_grid Skill grid
+    aₕ::Float64 # Parameter of the Beta distribution of skill
+    bₕ::Float64 # Parameter of the Beta distribution of skill
     n_h::Int64
     h_min::Float64
     h_max::Float64
@@ -194,7 +194,7 @@ function create_primitives_from_yaml(yaml_file::String)::Primitives
     κ₀    = model_parameters["kappa0"]
     κ₁    = model_parameters["kappa1"]
     β     = model_parameters["beta"]
-    δ     = model_parameters["delta_bar"]
+    δ     = model_parameters["delta"]
     b     = model_parameters["b"]
     ξ     = model_parameters["xi"]
     A₀    = model_parameters["A0"]
@@ -202,12 +202,12 @@ function create_primitives_from_yaml(yaml_file::String)::Primitives
     ψ₀    = model_parameters["psi_0"]
     ϕ     = model_parameters["phi"]
     ν     = model_parameters["nu"]
-    c₁    = model_parameters["c1"]
+    c₀    = model_parameters["c0"]
     χ     = model_parameters["chi"]
     γ₀    = model_parameters["gamma0"]
     γ₁    = model_parameters["gamma1"]
-    a_h   = model_parameters["a_h"]
-    b_h   = model_parameters["b_h"]
+    aₕ   = model_parameters["a_h"]
+    bₕ   = model_parameters["b_h"]
     n_ψ   = model_parameters["n_psi"]
     ψ_min  = model_grids["psi_min"]
     ψ_max  = model_grids["psi_max"]
@@ -227,7 +227,7 @@ function create_primitives_from_yaml(yaml_file::String)::Primitives
     h_values = collect(range(h_min, h_max, length=n_h))
     # Map h_values to [0,1] for Beta
     h_scaled = (h_values .- h_min) ./ (h_max - h_min)
-    beta_dist = Beta(a_h, b_h)
+    beta_dist = Beta(aₕ, bₕ)
     # Compute unnormalized pdf on grid
     h_pdf_raw = pdf.(beta_dist, h_scaled)
     # Normalize pdf to sum to 1 (discrete approximation)
@@ -237,84 +237,77 @@ function create_primitives_from_yaml(yaml_file::String)::Primitives
 
     # Build simple  functions that can be evaluated
     production_fun = (h, ψ, α) -> (A₀ + A₁*h) * ((1 - α) + α * (ψ₀ * h^ϕ * ψ^ν))
-    utility_fun    = (w, α)    -> w - c₁ * (1 - α)^(χ + 1) / (χ + 1)
+    utility_fun    = (w, α)    -> w - c₀ * (1 - α)^(χ + 1) / (χ + 1)
     matching_fun   = (V, U)    -> γ₀ * U^γ₁ * V^(1 - γ₁)
     
 
     #> Create Primitives object
     return Primitives(
-        A₀, A₁, ψ₀, ϕ, ν, c₁, χ, γ₀, γ₁, a_h, b_h,
+        A₀, A₁, ψ₀, ϕ, ν, c₀, χ, γ₀, γ₁,
         production_fun, utility_fun, matching_fun,
         κ₀, κ₁, β, δ, b, ξ,
-        n_ψ, ψ_min, ψ_max, ψ_grid, ψ_pdf, ψ_cdf,
-        n_h, h_min, h_max, h_values, h_pdf, h_cdf
+        n_ψ, ψ_min, ψ_max, ψ_grid, ψ_pdf, ψ_cdf, 
+        aₕ, bₕ, n_h, h_min, h_max, h_values, h_pdf, h_cdf
     )
 end
-"""
-    find_thresholds_and_optimal_remote_policy(prim::Primitives)
 
-Compute the threshold values of `ψ` and the optimal remote work policy `α` for each value of human capital `h`, given model primitives.
-
-# Arguments
-- `prim::Primitives`: A struct containing model parameters and grids, including:
-    - `ψ_grid`: Grid object for the remote work amenability parameter ψ.
-    - `h_grid`: Grid object for human capital h.
-    - `A₀`, `A₁`: Production function parameters.
-    - `ψ₀`, `ϕ`, `ν`: Parameters for the marginal benefit function.
-    - `c₁`, `χ`: Parameters for the marginal compensation function.
-
-# Returns
-- `ψ_bottom::Vector{Float64}`: For each `h`, the lower threshold of ψ below which the optimal remote work share α is 0.
-- `ψ_top::Vector{Float64}`: For each `h`, the upper threshold of ψ above which the optimal remote work share α is 1.
-- `α_policy::Matrix{Float64}`: Matrix of optimal remote work shares α for each (ψ, h) pair.
-
-# Description
-- For each value of human capital `h`, computes the lower and upper thresholds (`ψ_bottom`, `ψ_top`) of ψ where the marginal benefit from production equals the marginal compensation required to keep utility constant at α=0 and α=1, respectively.
-- For each (ψ, h) pair, determines the optimal remote work share α by solving the first-order condition. If ψ is below the lower threshold, α=0; if above the upper threshold, α=1; otherwise, α is found by root-finding.
-"""
 function find_thresholds_and_optimal_remote_policy(prim::Primitives)
-    @unpack n_ψ, ψ_grid, n_h, h_grid, A₀, A₁, ψ₀, ϕ, ν, c₁, χ, ψ_min, ψ_max = prim
-    # Marginal benefit from production wrt α (independent of α)
-    MB = (h, ψ) -> (A₀ + A₁*h) * ( -1 + ψ₀ * h^ϕ * ψ^ν )
-    # Marginal compensation change (w) required per α increase to keep u constant
-    MC = (α) -> - c₁ * (1 - α)^χ # since ∂u/∂w = 1 and ∂u/∂α = c₁(1-α)^χ
+    # 1. Unpack parameters
+    @unpack n_ψ, ψ_grid, n_h, h_grid, A₀, A₁, ψ₀, ϕ, ν, c₀, χ = prim
+
+    # 2. Define helper functions
+    A(h) = A₀ + A₁*h
+    g(h, ψ) = ψ₀ * h^ϕ * ψ^ν
+
+    # 3. Calculate thresholds analytically
+    ψ_top = @. (1 / (ψ₀ * h_grid^ϕ))^(1/ν)
+    
     ψ_bottom = zeros(n_h)
-    ψ_top    = zeros(n_h)
     for (i, h) in enumerate(h_grid)
-        # Bottom: MB(h, ψ) = MC(0)
-        f_bottom = ψ -> MB(h, ψ) - MC(0.0)
-        if f_bottom(ψ_min) * f_bottom(ψ_max) < 0
-            ψ_bottom[i] = find_zero(f_bottom, (ψ_min, ψ_max), Bisection())
-        elseif f_bottom(ψ_min) > 0
-            ψ_bottom[i] = -Inf
-        else
+        Ah = A₀ + A₁*h
+        if Ah <= c₀
             ψ_bottom[i] = Inf
-        end
-        # Top: MB(h, ψ) = MC(1) = 0
-        f_top = ψ -> MB(h, ψ)
-        if f_top(ψ_min) * f_top(ψ_max) < 0
-            ψ_top[i] = find_zero(f_top, (ψ_min, ψ_max), Bisection())
-        elseif f_top(ψ_min) > 0
-            ψ_top[i] = -Inf
         else
-            ψ_top[i] = Inf
+            ψ_bottom[i] = ψ_top[i] * (1 - c₀ / Ah)^(1/ν)
         end
     end
-    # α policy on (ψ, h)
+
+    # 4. Initialize policy matrix
     α_policy = zeros(n_ψ, n_h)
-    for (j, ψ) in enumerate(ψ_grid)
-        for (i, h) in enumerate(h_grid)
-            if ψ <= ψ_bottom[i]
-                α_policy[j, i] = 0.0
-            elseif ψ >= ψ_top[i]
-                α_policy[j, i] = 1.0
+
+    # 5. Compute the optimal α policy with CORRECTED logic
+    for (i, h) in enumerate(h_grid)
+        ψ_b = ψ_bottom[i]
+        ψ_t = ψ_top[i]
+
+        for (j, ψ) in enumerate(ψ_grid)
+            
+            # --- LOGIC CORRECTION IS HERE ---
+            if isinf(ψ_b)
+                # CASE 1: No hybrid region exists for this worker.
+                # The world is binary: either in-person or full-remote.
+                # The only threshold that matters is ψ_top.
+                if ψ >= ψ_t
+                    α_policy[j, i] = 1.0 # Full Remote
+                else
+                    α_policy[j, i] = 0.0 # Full In-Person
+                end
             else
-                # Solve MB(h,ψ) - MC(α) = 0 for α in (0,1)
-                foc = α -> MB(h, ψ) - MC(α)
-                α_policy[j, i] = find_zero(foc, (0.0, 1.0), Bisection())
+                # CASE 2: A hybrid region exists. Use the standard three-regime logic.
+                if ψ <= ψ_b
+                    α_policy[j, i] = 0.0 # Full In-Person
+                elseif ψ >= ψ_t
+                    α_policy[j, i] = 1.0 # Full Remote
+                else
+                    # Hybrid Work. Calculate the interior solution.
+                    term = ( (A₀ + A₁*h) / c₀) * (1 - g(h, ψ))
+                    # The term must be non-negative in the hybrid region by construction
+                    α_policy[j, i] = 1.0 - max(0.0, term)^(1/χ)
+                end
             end
         end
     end
+
     return ψ_bottom, ψ_top, α_policy
 end
 """

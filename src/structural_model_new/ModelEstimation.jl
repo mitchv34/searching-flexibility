@@ -1,7 +1,13 @@
-include("ModelSetup.jl")
-include("ModelSolver.jl")
+# ModelEstimation.jl depends on types and functions defined in ModelSetup.jl and
+# ModelSolver.jl (e.g. `Primitives`, `Results`, `update_params_and_resolve!`).
+# To avoid re-defining docstrings and symbols when files are included multiple
+# times in the same session, do NOT include the core files here. The top-level
+# runner should include `ModelSetup.jl` and `ModelSolver.jl` once before
+# including `ModelEstimation.jl`.
 
 using Random, Statistics, Distributions
+using Printf
+using Term
 """
     update_primitives!(prim::Primitives; kwargs...) -> NamedTuple
 
@@ -28,7 +34,7 @@ function update_primitives!(prim::Primitives; kwargs...)
 
     # Flags for minimal recomputations
     h_dist_keys = Set([:a_h, :b_h])
-    func_keys   = Set([:A₀, :A₁, :ψ₀, :ϕ, :ν, :c₁, :χ, :γ₀, :γ₁])
+    func_keys   = Set([:A₀, :A₁, :ψ₀, :ϕ, :ν, :c₀, :χ, :γ₀, :γ₁])
     alpha_keys  = union(func_keys, Set([:ψ_min, :ψ_max]))
 
     recompute_h_dist   = any(k -> (k in h_dist_keys) && (haskey(KW, k) && KW[k] != old_vals[k]), param_keys)
@@ -56,10 +62,10 @@ function update_primitives!(prim::Primitives; kwargs...)
     # Rebuild functional forms if needed
     if recreate_functions
         A₀, A₁, ψ₀, ϕ, ν = prim.A₀, prim.A₁, prim.ψ₀, prim.ϕ, prim.ν
-        c₁, χ = prim.c₁, prim.χ
+        c₀, χ = prim.c₀, prim.χ
         γ₀, γ₁ = prim.γ₀, prim.γ₁
         prim.production_fun = (h, ψ, α) -> (A₀ + A₁*h) * ((1 - α) + α * (ψ₀ * h^ϕ * ψ^ν))
-        prim.utility_fun    = (w, α)    -> w - c₁ * (1 - α)^(χ + 1) / (χ + 1)
+        prim.utility_fun    = (w, α)    -> w - c₀ * (1 - α)^(χ + 1) / (χ + 1)
         prim.matching_fun   = (V, U)    -> γ₀ * U^γ₁ * V^(1 - γ₁)
     end
 
@@ -99,13 +105,12 @@ function update_params_and_resolve!(prim::Primitives, res::Results; kwargs...)
     KW = Dict(kwargs)
     flags = update_primitives!(prim; kwargs...)
     new_res = fresh_results(prim, res; alpha_changed=flags.recompute_alpha)
-    tol        = get(KW, :tol, 1e-7)
-    max_iter   = get(KW, :max_iter, 5000)
-    verbose    = get(KW, :verbose, true)
-    print_freq = get(KW, :print_freq, 50)
-    λ_S        = get(KW, :λ_S, 0.1)
-    λ_u        = get(KW, :λ_u, 0.1)
-    solve_model(prim, new_res; tol=tol, max_iter=max_iter, verbose=verbose, print_freq=print_freq, λ_S=λ_S, λ_u=λ_u)
+    tol        = 1e-7
+    max_iter   = 10000
+    verbose    = false
+    λ_S        = 0.01
+    λ_u        = 0.01
+    solve_model(prim, new_res; tol=tol, max_iter=max_iter, verbose=verbose, λ_S=λ_S, λ_u=λ_u)
     return prim, new_res
 end
 
@@ -151,7 +156,7 @@ Compute model-implied moments from the steady-state cross-section of employed wo
 Comprehensive set of theoretical moments for structural estimation, including unconditional
 wage statistics, conditional moments by work arrangement and firm type, and market aggregates.
 """
-function compute_model_moments_opt(
+function compute_model_moments(
     prim::Primitives, 
     res::Results;
     q_low_cut::Float64=0.25, 
@@ -403,9 +408,235 @@ Update parameters (via kwargs), resolve, compute model moments, and return a sim
 least-squares objective vs provided `data_moments`.
 """
 function estimation_objective(prim::Primitives, res::Results; data_moments::NamedTuple, kwargs...)
-    _, res_new = update_params_and_resolve!(prim, res; kwargs...)
-    model_moments = compute_model_moments(prim, res_new)
+    # If no overrides, use the current solution `res` directly to avoid drift.
+    if length(kwargs) == 0
+        model_moments = compute_model_moments(prim, res)
+        keys = fieldnames(typeof(data_moments))
+        return sum((getfield(model_moments, k) - getfield(data_moments, k))^2 for k in keys)
+    end
+
+    # With overrides: temporarily update primitives, resolve, compute, then restore.
+    KW = Dict(kwargs)
+    prim_fields = Set(fieldnames(Primitives))
+    saved = Dict{Symbol,Any}()
+    for (k, _) in KW
+        if k in prim_fields
+            saved[k] = getfield(prim, k)
+        end
+    end
+
+    try
+        _, res_new = update_params_and_resolve!(prim, res; kwargs...)
+        model_moments = compute_model_moments(prim, res_new)
+    finally
+        # Restore primitive fields and rebuild closures if needed
+        if !isempty(saved)
+            update_primitives!(prim; saved...)
+        end
+    end
+
     keys = fieldnames(typeof(data_moments))
     return sum((getfield(model_moments, k) - getfield(data_moments, k))^2 for k in keys)
+end
+
+using YAML
+
+"""
+    save_moments_to_yaml(moments::NamedTuple, filename::String)
+
+Save model moments to a YAML file for later use as target moments in estimation.
+"""
+function save_moments_to_yaml(moments::NamedTuple, filename::String)
+    moments_dict = Dict(string(k) => v for (k, v) in pairs(moments))
+    YAML.write_file(filename, moments_dict)
+    println("Saved moments to: $filename")
+end
+
+"""
+    load_moments_from_yaml(filename::String) -> NamedTuple
+
+Load target moments from a YAML file and convert back to NamedTuple.
+"""
+function load_moments_from_yaml(filename::String)
+    moments_dict = YAML.load_file(filename)
+    moment_keys = Symbol.(collect(Base.keys(moments_dict)))
+    moment_values = collect(Base.values(moments_dict))
+    return NamedTuple{Tuple(moment_keys)}(moment_values)
+end
+
+"""
+    perturb_parameters(prim::Primitives; scale::Float64=0.1) -> Dict{Symbol, Float64}
+
+Create perturbed parameter values for testing parameter recovery.
+Returns a dictionary of parameter perturbations.
+"""
+function perturb_parameters(prim::Primitives; scale::Float64=0.1)
+    # Key parameters to perturb for testing
+    params = Dict{Symbol, Float64}()
+    
+    # Production parameters
+    params[:A₁] = prim.A₁ * (1.0 + scale * randn())
+    params[:ψ₀] = prim.ψ₀ * (1.0 + scale * randn())
+    params[:ν] = max(0.1, prim.ν * (1.0 + scale * randn()))
+    
+    # Human capital distribution
+    params[:a_h] = max(0.5, prim.a_h * (1.0 + scale * randn()))
+    params[:b_h] = max(0.5, prim.b_h * (1.0 + scale * randn()))
+    
+    # Cost parameters
+    params[:χ] = max(0.1, prim.χ * (1.0 + scale * randn()))
+    params[:c₀] = max(0.01, prim.c₀ * (1.0 + scale * randn()))
+
+    # Additional parameters (if present on Primitives)
+    if hasfield(typeof(prim), :ϕ)
+        params[:ϕ] = max(1e-6, prim.ϕ * (1.0 + scale * randn()))
+    end
+    if hasfield(typeof(prim), :κ₀)
+        params[:κ₀] = max(1e-6, prim.κ₀ * (1.0 + scale * randn()))
+    end
+    
+    return params
+end
+
+"""
+    simple_estimation(prim::Primitives, res::Results, target_moments::NamedTuple;
+                      max_iter::Int=50, step_size::Float64=0.01, tol::Float64=1e-4,
+                      seed::Union{Int,Nothing}=nothing, step_decay::Float64=0.95,
+                      decay_every::Int=50, min_step_size::Float64=1e-4,
+                      verbose::Bool=true) -> Dict
+
+Simple gradient-free estimation using random search with step-size annealing.
+- step_size: std dev of relative multiplicative perturbations per proposal.
+- step_decay: multiplicative decay factor applied every `decay_every` iters.
+- min_step_size: lower bound for the annealed step size.
+- seed: set RNG seed for reproducibility when provided.
+"""
+function simple_estimation(prim::Primitives, res::Results, target_moments::NamedTuple;
+                           max_iter::Int=50, step_size::Float64=0.01, tol::Float64=1e-4,
+                           seed::Union{Int,Nothing}=nothing, step_decay::Float64=0.95,
+                           decay_every::Int=50, min_step_size::Float64=1e-4,
+                           verbose::Bool=true)
+
+    seed !== nothing && Random.seed!(seed)
+
+    # Initialize with current parameters
+    best_params = Dict{Symbol, Float64}(
+        :A₁ => prim.A₁, :ψ₀ => prim.ψ₀, :ν => prim.ν,
+        :a_h => prim.a_h, :b_h => prim.b_h,
+        :χ => prim.χ, :c₀ => prim.c₀
+    )
+
+    best_obj = estimation_objective(prim, res; data_moments=target_moments, best_params...)
+
+    if verbose
+        hdr = @sprintf("Random search (annealed) | init_step=%.5f | decay=%.3f/%d | min_step=%.5f",
+                       step_size, step_decay, decay_every, min_step_size)
+        printstyled("\n" * "="^80 * "\n"; color=:cyan, bold=true)
+        printstyled(hdr * "\n"; color=:cyan, bold=true)
+        seed !== nothing && printstyled(@sprintf("Seed = %d\n", seed); color=:light_black, bold=false)
+        printstyled(@sprintf("Initial objective: %.6e\n", best_obj); color=:magenta, bold=true)
+        printstyled("-"^80 * "\n"; color=:cyan)
+    end
+
+    cur_step = step_size
+
+    for iter in 1:max_iter
+        # Anneal step size
+        if decay_every > 0 && iter % decay_every == 0
+            new_step = max(min_step_size, cur_step * step_decay)
+            if verbose && new_step != cur_step
+                printstyled(@sprintf("Anneal @ iter %d: step_size %.6f → %.6f\n",
+                                     iter, cur_step, new_step); color=:yellow, bold=true)
+            end
+            cur_step = new_step
+        end
+
+        # Random perturbation around current best
+        candidate_params = copy(best_params)
+        for (k, v) in candidate_params
+            candidate_params[k] = max(0.01, v * (1.0 + cur_step * randn()))
+            # Keep ν above a softer lower bound (just in case)
+            if k == :ν
+                candidate_params[k] = max(0.05, candidate_params[k])
+            end
+        end
+
+        # Evaluate objective
+        try
+            obj = estimation_objective(prim, res; data_moments=target_moments, candidate_params...)
+
+            if obj < best_obj
+                best_params = candidate_params
+                best_obj = obj
+                if verbose
+                    printstyled(@sprintf("Iter %6d | New best obj = %.6e | step=%.6f\n",
+                                         iter, best_obj, cur_step); color=:green, bold=true)
+                end
+            else
+                if verbose && (iter % 50 == 0)
+                    printstyled(@sprintf("Iter %6d | obj = %.6e | step=%.6f\n",
+                                         iter, obj, cur_step); color=:blue, bold=false)
+                end
+            end
+
+            if best_obj < tol
+                if verbose
+                    printstyled(@sprintf("Converged at iter %d with obj = %.6e\n",
+                                         iter, best_obj); color=:green, bold=true)
+                    printstyled("="^80 * "\n"; color=:cyan, bold=true)
+                end
+                break
+            end
+        catch e
+            if verbose
+                printstyled(@sprintf("Iter %6d | proposal failed (%s)\n", iter, typeof(e)),
+                            color=:red, bold=true)
+            end
+            continue
+        end
+    end
+
+    return Dict(:params => best_params, :objective => best_obj)
+end
+
+"""
+    test_parameter_recovery(prim::Primitives, res::Results; verbose::Bool=true) -> Bool
+
+Full test: solve model, save moments, perturb parameters, then try to recover them.
+Returns true if recovery was successful (objective < tol), false otherwise.
+"""
+function test_parameter_recovery(prim::Primitives, res::Results; verbose::Bool=true, tol::Float64=1e-5)
+    # 1. Save current moments as "true" moments
+    true_moments = compute_model_moments(prim, res)
+    temp_file = "temp_target_moments.yaml"
+    save_moments_to_yaml(true_moments, temp_file)
+    
+    # 2. Perturb parameters
+    perturbed_params = perturb_parameters(prim; scale=0.15)
+    if verbose
+        println("Perturbed parameters:")
+        for (k, v) in perturbed_params
+            println("  $k: $(getfield(prim, k)) → $v")
+        end
+    end
+    
+    # 3. Apply perturbations
+    for (k, v) in perturbed_params
+        setfield!(prim, k, v)
+    end
+    
+    # 4. Try to recover
+    target_moments = load_moments_from_yaml(temp_file)
+    result = simple_estimation(prim, res, target_moments; max_iter=1000, step_size=0.001)
+    
+    # 5. Clean up
+    rm(temp_file, force=true)
+    
+    success = result[:objective] < tol
+    if verbose
+        println("Recovery $(success ? "PASSED" : "FAILED"): Final objective = $(round(result[:objective], digits=6))")
+    end
+    
+    return success
 end
 

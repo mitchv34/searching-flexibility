@@ -9,11 +9,12 @@ Description: Contains the core functions to solve for the steady-state equilibri
 #? Main Solver Function
 #==========================================================================================#
 using Parameters, Printf, Term
+using ForwardDiff 
 """
     solve_model(prim::Primitives, res::Results; 
                 tol::Float64=1e-7, max_iter::Int=5000, 
                 verbose::Bool=true, print_freq::Int=50, 
-                λ_S::Float64=0.1, λ_u::Float64=0.1)
+                λ_S::Float64=0.01, λ_u::Float64=0.01)
 
 Solves the random search model by computing the equilibrium surplus matrix `S` and 
 unemployment distribution `u` using a fixed-point iteration algorithm.
@@ -43,152 +44,240 @@ The function modifies the `res` object in-place, updating its fields with the
 equilibrium values for surplus, market tightness, job-finding rate, vacancy-filling rate,
 vacancies, unemployment, and other derived quantities.
 """
-function solve_model(   
-                        prim::Primitives,   # Model parameters and grids
-                        res::Results;       # Initial results object to be updated
-                        tol::Float64=1e-7,  # convergence tolerance for outer loop on θ
-                        max_iter::Int=5000,  # maximum number of iterations for outer loop
-                        verbose::Bool=true, # print convergence progress
-                        λ_S::Float64 = 0.01, # damping factor for surplus S
-                        λ_u::Float64 = 0.01  # damping factor for unemployment u
+# function solve_model(   
+#                         prim::Primitives,   # Model parameters and grids
+#                         res::Results;       # Initial results object to be updated
+#                         tol::Float64=1e-7,  # convergence tolerance for outer loop on θ
+#                         max_iter::Int=5000,  # maximum number of iterations for outer loop
+#                         verbose::Bool=true, # print convergence progress
+#                         λ_S::Float64 = 0.01, # damping factor for surplus S
+#                         λ_u::Float64 = 0.01  # damping factor for unemployment u
+#                     )
+
+
+#     #* Phase 0: Setup & pre-calculations
+#     @unpack h_grid, ψ_grid, β, δ, ξ, κ₀, κ₁, n_h, n_ψ, γ₀, γ₁ = prim
+#     f_h = prim.h_pdf
+#     f_ψ = prim.ψ_pdf
+#     Γ = f_ψ ./ sum(f_ψ)                                     # firm type distribution Γ(ψ)
+#     # static α* and flow surplus s(h,ψ)
+#     s_flow = calculate_flow_surplus(prim, res)
+#     # Initialize S and u
+#     S = copy(s_flow)                                       # S(h,ψ) = s(h,ψ)
+#     u = copy(f_h)                                          # u₀(h)=N(h)
+    
+#     denom = 1.0 - β * (1.0 - δ) # denominator in the Bellman equation for surplus S(h,ψ)
+    
+#     ΔS = Inf # Initialize change in surplus for convergence check
+#     Δu_prev = Inf
+#     ΔS_prev = Inf
+
+
+
+#     #* Phase 1: main fixed‐point on S and u
+#     for k in 1:max_iter
+#         S_old = copy(S)
+#         u_old = copy(u)
+        
+#         #? --- Step 1: Calculate market aggregates based on S_old and u_old ---
+#         L = sum(u)
+#         u_dist = u ./ L
+        
+#         #> (a) Firm's expected benefit B(ψ) per filled vacancy
+#         # B(ψ) = ∫(1-ξ)S(h,ψ)⁺ * (u(h)/L) dF_h(h)
+#         B = [ sum((1.0-ξ) * max.(0.0, S_old[:, j]) .* u_dist) for j in 1:n_ψ ]
+        
+#         #> (b) Market tightness θ
+#         # θ = [ (1/L) * ∫(B(ψ)/κ₀)^(1/κ₁) dF_ψ(ψ) ]^(κ₁/(κ₁+γ))
+#         Integral = sum((B ./ κ₀).^(1/κ₁) .* f_ψ) 
+#         θ = ((1/L) * Integral)^(κ₁ / (κ₁ + γ₁))
+        
+#         #> (c) Aggregate job finding (p) and vacancy filling (q) probabilities
+#         p = θ^(1 - γ₁)
+#         q = θ^(-γ₁)
+        
+#         #? --- Step 2: Calculate the ENDOGENOUS vacancy distribution Γ ---
+        
+#         #> (d) Vacancies per firm v(ψ) and aggregate vacancies V
+#         # v(ψ) = (q*B(ψ)/κ₀)^(1/κ₁)
+#         v = ( (q .* B) ./ κ₀ ).^(1/κ₁)
+#         # V = ∫v(ψ)dF_ψ(ψ)
+#         V = sum(v .* f_ψ) 
+
+#         #> (e) Distribution of vacancies met by workers, Γ(ψ)
+#         # Γ(ψ) = v(ψ)f_ψ(ψ) / V
+#         Γ_new = V > 0 ? (v .* f_ψ) ./ V : zeros(n_ψ)
+
+#         #? --- Step 3: Update S and u using the NEW endogenous Γ ---
+        
+#         #> (f) Update Surplus Matrix S
+#         ExpectedSearch = sum(max.(0.0, S_old) .* Γ_new', dims=2)
+#         S_update = @. (s_flow - (β * p * ξ * ExpectedSearch)) / denom 
+#         S .= (1.0 - λ_S) .* S_old .+ λ_S .* S_update
+#         #> (g) Update Unemployment Vector u
+#         # --- JACOBI-STYLE UPDATE ---
+#         # Calculate ProbAccept using S_old to be consistent with p and Γ_new
+#         ProbAccept = sum((S_old .> 0.0) .* Γ_new', dims=2) # <-- USE S_old HERE
+#         # ---------------------------
+#         unemp_rate = @. δ / (δ + p * ProbAccept)
+#         u_update = unemp_rate .* f_h 
+#         u .= (1.0 - λ_u) .* u_old .+ λ_u .* u_update
+
+#         #> (h) Check for convergence
+#         # ΔS = maximum(abs.(S .- S_old))
+#         ΔS = maximum(abs.(ForwardDiff.value.(S) - ForwardDiff.value.(S_old)))
+#         # Δu = maximum(abs.(u .- u_old))
+#         Δu = maximum(abs.(ForwardDiff.value.(u) - ForwardDiff.value.(u_old)))
+
+#         # Initialize baseline residuals on first iteration
+#         if k == 1
+#             ΔS0 = ΔS
+#             Δu0 = Δu
+#         end
+
+#         ΔS_prev = ΔS
+#         Δu_prev = Δu
+
+#         if verbose && k % 1 == 0
+#             println(@bold @cyan "Iteration $k: ΔS=$ΔS")
+#         end
+
+#         if ΔS < tol
+
+#             if verbose
+#                 println(@bold @green "Converged after $k iters (ΔS=$ΔS).")
+#             end
+#             break
+#         end
+#     end # for k in 1:max_iter
+
+
+#     if ΔS >= tol
+#         @warn "Model failed to converge after $max_iter iterations. Last change: ΔS=$ΔS"
+#     end
+
+#     #* Phase 2: Post‐processing – assemble Results
+    
+#     # --- ONE FINAL UPDATE FOR FULL CONSISTENCY ---
+#     # Recalculate all aggregate variables using the final converged S and u
+#     # to ensure perfect synchronization before calculating final policies.
+    
+#     # (a) Final L and B
+#     L_final = sum(u)
+#     u_dist_final = L_final > 0 ? u ./ L_final : zeros(n_h)
+#     B_final = [ sum((1.0-ξ) * max.(0.0, S[:, j]) .* u_dist_final) for j in 1:n_ψ ]
+    
+#     # (b) Final θ
+#     Integral_final = sum((B_final ./ κ₀).^(1/κ₁) .* f_ψ)
+#     θ_final = ((1/L_final) * Integral_final)^(κ₁ / (κ₁ + γ₁))
+    
+#     # (c) Final p and q
+#     p_final = θ_final^(1 - γ₁)
+#     q_final = θ_final^(-γ₁)
+
+#     # (d) Final v
+#     v_final = ( (q_final .* B_final) ./ κ₀ ).^(1/κ₁)
+#     # -----------------------------------------
+
+#     # Store the fully consistent, final values in the results object
+#     res.S .= S
+#     res.θ  = θ_final
+#     res.p  = p_final
+#     res.q  = q_final
+#     res.v .= v_final
+#     res.u .= u
+    
+#     # Calculate final wage, unemployment value, and employment distribution
+#     calculate_final_policies!(res, prim)
+            
+# end
+
+function solve_model(
+                        prim::Primitives,
+                        res::Results;
+                        tol::Float64=1e-7,
+                        max_iter::Int=5000,
+                        verbose::Bool=true,
+                        λ_S::Float64 = 0.01,
+                        λ_u::Float64 = 0.01
                     )
 
-
-    #* Phase 0: Setup & pre-calculations
     @unpack h_grid, ψ_grid, β, δ, ξ, κ₀, κ₁, n_h, n_ψ, γ₀, γ₁ = prim
     f_h = prim.h_pdf
     f_ψ = prim.ψ_pdf
-    Γ = f_ψ ./ sum(f_ψ)                                     # firm type distribution Γ(ψ)
-    # static α* and flow surplus s(h,ψ)
+    Γ = f_ψ ./ sum(f_ψ)
     s_flow = calculate_flow_surplus(prim, res)
-    # Initialize S and u
-    S = copy(s_flow)                                       # S(h,ψ) = s(h,ψ)
-    u = copy(f_h)                                          # u₀(h)=N(h)
-    
-    denom = 1.0 - β * (1.0 - δ) # denominator in the Bellman equation for surplus S(h,ψ)
-    
-    ΔS = Inf # Initialize change in surplus for convergence check
-    Δu_prev = Inf
-    ΔS_prev = Inf
 
+    # --- AD FIX: Initialize arrays with the parameter type ---
+    # Get the numeric type from a parameter that will be differentiated.
+    # If AD is running, T will be a Dual type. If not, it will be Float64.
+    T = eltype(prim.c₀)
 
+    # Initialize S and u as arrays of type T.
+    S = T.(s_flow)
+    u = T.(f_h)
+    # --- END FIX ---
 
-    #* Phase 1: main fixed‐point on S and u
+    denom = 1.0 - β * (1.0 - δ)
+    ΔS = Inf
+
     for k in 1:max_iter
         S_old = copy(S)
         u_old = copy(u)
-        
-        #? --- Step 1: Calculate market aggregates based on S_old and u_old ---
+
         L = sum(u)
         u_dist = u ./ L
-        
-        #> (a) Firm's expected benefit B(ψ) per filled vacancy
-        # B(ψ) = ∫(1-ξ)S(h,ψ)⁺ * (u(h)/L) dF_h(h)
-        B = [ sum((1.0-ξ) * max.(0.0, S_old[:, j]) .* u_dist) for j in 1:n_ψ ]
-        
-        #> (b) Market tightness θ
-        # θ = [ (1/L) * ∫(B(ψ)/κ₀)^(1/κ₁) dF_ψ(ψ) ]^(κ₁/(κ₁+γ))
-        Integral = sum((B ./ κ₀).^(1/κ₁) .* f_ψ) 
+
+        # Use ForwardDiff.value for all comparisons and control flow
+        B = [ sum((1.0-ξ) * max.(0.0, ForwardDiff.value.(S_old[:, j])) .* u_dist) for j in 1:n_ψ ]
+        Integral = sum((B ./ κ₀).^(1/κ₁) .* f_ψ)
         θ = ((1/L) * Integral)^(κ₁ / (κ₁ + γ₁))
-        
-        #> (c) Aggregate job finding (p) and vacancy filling (q) probabilities
         p = θ^(1 - γ₁)
         q = θ^(-γ₁)
-        
-        #? --- Step 2: Calculate the ENDOGENOUS vacancy distribution Γ ---
-        
-        #> (d) Vacancies per firm v(ψ) and aggregate vacancies V
-        # v(ψ) = (q*B(ψ)/κ₀)^(1/κ₁)
         v = ( (q .* B) ./ κ₀ ).^(1/κ₁)
-        # V = ∫v(ψ)dF_ψ(ψ)
-        V = sum(v .* f_ψ) 
+        V = sum(v .* f_ψ)
+        Γ_new = ForwardDiff.value(V) > 0 ? (v .* f_ψ) ./ V : zeros(n_ψ)
 
-        #> (e) Distribution of vacancies met by workers, Γ(ψ)
-        # Γ(ψ) = v(ψ)f_ψ(ψ) / V
-        Γ_new = V > 0 ? (v .* f_ψ) ./ V : zeros(n_ψ)
-
-        #? --- Step 3: Update S and u using the NEW endogenous Γ ---
-        
-        #> (f) Update Surplus Matrix S
-        ExpectedSearch = sum(max.(0.0, S_old) .* Γ_new', dims=2)
-        S_update = @. (s_flow - (β * p * ξ * ExpectedSearch)) / denom 
+        ExpectedSearch = sum(max.(0.0, ForwardDiff.value.(S_old)) .* Γ_new', dims=2)
+        S_update = @. (s_flow - (β * p * ξ * ExpectedSearch)) / denom
         S .= (1.0 - λ_S) .* S_old .+ λ_S .* S_update
-        #> (g) Update Unemployment Vector u
-        # --- JACOBI-STYLE UPDATE ---
-        # Calculate ProbAccept using S_old to be consistent with p and Γ_new
-        ProbAccept = sum((S_old .> 0.0) .* Γ_new', dims=2) # <-- USE S_old HERE
-        # ---------------------------
+
+        ProbAccept = sum((ForwardDiff.value.(S_old) .> 0.0) .* Γ_new', dims=2)
         unemp_rate = @. δ / (δ + p * ProbAccept)
-        u_update = unemp_rate .* f_h 
+        u_update = unemp_rate .* f_h
         u .= (1.0 - λ_u) .* u_old .+ λ_u .* u_update
 
-        #> (h) Check for convergence
-        ΔS = maximum(abs.(S .- S_old))
-        Δu = maximum(abs.(u .- u_old))
-
-        # Initialize baseline residuals on first iteration
-        if k == 1
-            ΔS0 = ΔS
-            Δu0 = Δu
-        end
-
-        ΔS_prev = ΔS
-        Δu_prev = Δu
-
-        if verbose && k % 1 == 0
-            println(@bold @cyan "Iteration $k: ΔS=$ΔS")
-        end
+        ΔS = maximum(abs.(ForwardDiff.value.(S) .- ForwardDiff.value.(S_old)))
 
         if ΔS < tol
-
-            if verbose
-                println(@bold @green "Converged after $k iters (ΔS=$ΔS).")
-            end
+            if verbose; println(@bold @green "Converged after $k iters (ΔS=$ΔS)."); end
             break
         end
-    end # for k in 1:max_iter
-
+    end
 
     if ΔS >= tol
         @warn "Model failed to converge after $max_iter iterations. Last change: ΔS=$ΔS"
     end
 
-    #* Phase 2: Post‐processing – assemble Results
-    
-    # --- ONE FINAL UPDATE FOR FULL CONSISTENCY ---
-    # Recalculate all aggregate variables using the final converged S and u
-    # to ensure perfect synchronization before calculating final policies.
-    
-    # (a) Final L and B
+    # Post-processing
     L_final = sum(u)
     u_dist_final = L_final > 0 ? u ./ L_final : zeros(n_h)
-    B_final = [ sum((1.0-ξ) * max.(0.0, S[:, j]) .* u_dist_final) for j in 1:n_ψ ]
-    
-    # (b) Final θ
+    B_final = [ sum((1.0-ξ) * max.(0.0, ForwardDiff.value.(S[:, j])) .* u_dist_final) for j in 1:n_ψ ]
     Integral_final = sum((B_final ./ κ₀).^(1/κ₁) .* f_ψ)
     θ_final = ((1/L_final) * Integral_final)^(κ₁ / (κ₁ + γ₁))
-    
-    # (c) Final p and q
     p_final = θ_final^(1 - γ₁)
     q_final = θ_final^(-γ₁)
-
-    # (d) Final v
     v_final = ( (q_final .* B_final) ./ κ₀ ).^(1/κ₁)
-    # -----------------------------------------
 
-    # Store the fully consistent, final values in the results object
     res.S .= S
     res.θ  = θ_final
     res.p  = p_final
     res.q  = q_final
     res.v .= v_final
     res.u .= u
-    
-    # Calculate final wage, unemployment value, and employment distribution
-    calculate_final_policies!(res, prim)
-            
-end
 
+    calculate_final_policies!(res, prim)
+end
 #==========================================================================================
 #? Core Inner Loop and Update Functions
 ==========================================================================================#
