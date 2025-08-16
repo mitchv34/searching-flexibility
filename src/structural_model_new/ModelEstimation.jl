@@ -1,184 +1,295 @@
 # ModelEstimation.jl depends on types and functions defined in ModelSetup.jl and
-# ModelSolver.jl (e.g. `Primitives`, `Results`, `update_params_and_resolve!`).
+# ModelSolver.jl (e.g. `Primitives`, `Results`, `update_params_and_resolve`).
 # To avoid re-defining docstrings and symbols when files are included multiple
 # times in the same session, do NOT include the core files here. The top-level
 # runner should include `ModelSetup.jl` and `ModelSolver.jl` once before
 # including `ModelEstimation.jl`.
 
-using Random, Statistics, Distributions
-using Printf
-using Term
-"""
-    update_primitives!(prim::Primitives; kwargs...) -> NamedTuple
+using Random, Statistics, Distributions, LinearAlgebra , ForwardDiff
+using Printf, Term, YAML
 
-Update primitive parameters in-place with minimal recomputation and return flags:
-(:recompute_h_dist, :recreate_functions, :recompute_alpha).
-
-- Recompute h distribution iff `a_h` or `b_h` changed.
-- Recreate closures iff production/utility/matching parameters changed.
-- α-policy should be recomputed iff α-affecting parameters changed.
 """
-function update_primitives!(prim::Primitives; kwargs...)
-    KW = Dict(kwargs)
+update_primitives_results(prim::Primitives, res::Results; params_to_update::Dict=Dict(), kwargs...)
+
+Update a Primitives object by applying a set of parameter overrides and
+rebuilding any dependent primitive quantities, then construct a fresh
+Results object from the updated primitives.
+
+This function does not mutate the provided `prim` or `res`; it returns a
+new validated `Primitives` instance and a new `Results` instance
+constructed from it.
+
+Arguments
+- prim::Primitives
+    The current primitives object whose fields provide default values.
+- res::Results
+    The current results object (kept for API symmetry). It is not read
+    deeply by this routine other than to match the original signature.
+- params_to_update::Dict (optional, default = Dict())
+    A dictionary mapping Symbol keys to new values that should override
+    the corresponding fields in `prim`. Keys are expected to match the
+    field names of `Primitives`. If a key is not present in this dict,
+    the value from `prim` is retained.
+- kwargs...
+    Additional keyword arguments are accepted but not used by the
+    current implementation.
+
+Behavior
+- Builds an updated parameter map `pairs` by taking all fields of `prim`
+    and replacing any fields present in `params_to_update`.
+- Detects whether the h-distribution needs to be recomputed. By
+    default, this happens when any of the h-distribution parameters
+    (e.g. :a_h, :b_h) included in `params_to_update` change relative to
+    the corresponding value in `prim`.
+- If the h-distribution is recomputed:
+    - The function rescales `h_grid` to [0,1] using `h_min` and `h_max`.
+    - It evaluates a Beta distribution with parameters (a_h, b_h) on the
+        scaled grid to produce an unnormalized PDF, normalizes it to sum to
+        1, and computes the cumulative distribution (CDF) by cumulative sum
+        and renormalization.
+    - The updated `:h_pdf` and `:h_cdf` are placed into the parameter map.
+- Constructs a new, validated `Primitives` object (via `validated_Primitives`)
+    from the updated parameter map. Note: arrays such as ψ_grid/ψ_pdf/ψ_cdf
+    are converted to Vector{Float64} in the new object.
+- Constructs a new `Results` instance from the validated primitives:
+    new_res = Results(new_prim).
+- Returns `(new_prim, new_res)`.
+
+Return
+- Tuple{Primitives, Results}
+    A validated, updated primitives instance and the Results object derived
+    from it.
+
+Notes and caveats
+- The function currently always constructs a new `Results` object and may
+    precompute policies (e.g., α_policy) even when not required; there is a
+- Keys in `params_to_update` must match the field names of `Primitives`.
+    Be careful about ASCII vs. Unicode symbol differences (for example,
+    `:a_h` vs `:aₕ`) — mismatched symbol names will not update the intended
+    field.
+- Comparison of "old" vs "new" values uses !=; if parameters are arrays
+    or other complex objects, ensure that the intended notion of change is
+    captured by this comparison.
+- Validation performed by `validated_Primitives` can raise errors if the
+    updated parameters are invalid.
+
+Example
+    # Replace selected primitives and get updated objects
+    new_prim, new_res = update_primitives_results(prim, res, Dict(:a_h => 2.0, :b_h => 5.0))
+"""
+function update_primitives_results(
+                            prim::Primitives,
+                            res::Results,
+                            params_to_update::Dict=Dict()
+                            ; kwargs...)
     prim_fields = Set(fieldnames(Primitives))
-
-    # Determine which primitive fields are being updated
-    old_vals = Dict{Symbol,Any}()
-    param_keys = Symbol[]
-    for (k, v) in KW
-        if k in prim_fields
-            push!(param_keys, k)
-            old_vals[k] = getfield(prim, k)
-        end
-    end
-
-    # Flags for minimal recomputations
+    pairs = Dict([ k => (haskey(params_to_update, k) ? params_to_update[k] : getfield(prim, k)) for k in prim_fields ])
+    
     h_dist_keys = Set([:a_h, :b_h])
-    func_keys   = Set([:A₀, :A₁, :ψ₀, :ϕ, :ν, :c₀, :χ, :γ₀, :γ₁])
-    alpha_keys  = union(func_keys, Set([:ψ_min, :ψ_max]))
+    alpha_keys  = Set([:A₀, :A₁, :ψ₀, :ϕ, :ν, :c₀, :χ, :γ₀, :γ₁])
 
-    recompute_h_dist   = any(k -> (k in h_dist_keys) && (haskey(KW, k) && KW[k] != old_vals[k]), param_keys)
-    recreate_functions = any(k -> k in func_keys, param_keys)
-    recompute_alpha    = recreate_functions || any(k -> k in alpha_keys, param_keys)
-
-    # Apply primitive updates
-    for k in param_keys
-        setfield!(prim, k, KW[k])
-    end
-
+    # Flags for alpha recomputation
+    old_values = Dict(k => getfield(prim, k) for k in keys(params_to_update))
+    recompute_h_dist = any(k -> (k in h_dist_keys) && (pairs[k] != old_values[k]), keys(params_to_update))
+    recompute_alpha  = any(k -> (k in alpha_keys)  && (pairs[k] != old_values[k]), keys(params_to_update))
+    
     # Update h distribution if needed (keep same grid points)
-    if recompute_h_dist
-        h_values = prim.h_grid
-        h_min, h_max = prim.h_min, prim.h_max
+    if true #recompute_h_dist
+        #TODO figure out why it allways evaluates to false
+        h_values = pairs[:h_grid]
+        h_min, h_max = pairs[:h_min], pairs[:h_max]
         h_scaled = (h_values .- h_min) ./ (h_max - h_min)
-        beta_dist = Distributions.Beta(prim.a_h, prim.b_h)
+        beta_dist = Distributions.Beta(pairs[:aₕ], pairs[:bₕ])
         h_pdf_raw = pdf.(beta_dist, h_scaled)
         h_pdf = h_pdf_raw ./ sum(h_pdf_raw)
+        pairs[:h_pdf] = h_pdf
         h_cdf = cumsum(h_pdf)
-        prim.h_pdf = h_pdf
-        prim.h_cdf = h_cdf
+        h_cdf /= h_cdf[end]
+        pairs[:h_cdf] = h_cdf
     end
 
-    # Rebuild functional forms if needed
-    if recreate_functions
-        A₀, A₁, ψ₀, ϕ, ν = prim.A₀, prim.A₁, prim.ψ₀, prim.ϕ, prim.ν
-        c₀, χ = prim.c₀, prim.χ
-        γ₀, γ₁ = prim.γ₀, prim.γ₁
-        prim.production_fun = (h, ψ, α) -> (A₀ + A₁*h) * ((1 - α) + α * (ψ₀ * h^ϕ * ψ^ν))
-        prim.utility_fun    = (w, α)    -> w - c₀ * (1 - α)^(χ + 1) / (χ + 1)
-        prim.matching_fun   = (V, U)    -> γ₀ * U^γ₁ * V^(1 - γ₁)
-    end
+    # Create new primitives 
+    new_prim = validated_Primitives(
+        A₀=pairs[:A₀], A₁=pairs[:A₁], ψ₀=pairs[:ψ₀], ϕ=pairs[:ϕ], ν=pairs[:ν], c₀=pairs[:c₀], χ=pairs[:χ], γ₀=pairs[:γ₀], γ₁=pairs[:γ₁],
+        κ₀=pairs[:κ₀], κ₁=pairs[:κ₁], β=pairs[:β], δ=pairs[:δ], b=pairs[:b], ξ=pairs[:ξ],
+        n_ψ=pairs[:n_ψ], ψ_min=pairs[:ψ_min], ψ_max=pairs[:ψ_max], ψ_grid=Vector{Float64}(pairs[:ψ_grid]),
+        ψ_pdf=Vector{Float64}(pairs[:ψ_pdf]), ψ_cdf=Vector{Float64}(pairs[:ψ_cdf]),
+        aₕ=pairs[:aₕ], bₕ=pairs[:bₕ], n_h=pairs[:n_h], h_min=pairs[:h_min], h_max=pairs[:h_max],
+        h_grid=pairs[:h_grid], h_pdf=pairs[:h_pdf], h_cdf=pairs[:h_cdf]
+    )
 
-    return (recompute_h_dist=recompute_h_dist,
-            recreate_functions=recreate_functions,
-            recompute_alpha=recompute_alpha)
+    # Create new results
+    #TODO: Skip pre-computation of α_policy if not needed
+    new_res = Results(new_prim)
+    return new_prim, new_res
 end
 
 """
-    fresh_results(prim::Primitives, old_res::Results=nothing; alpha_changed::Union{Bool,Nothing}=nothing) -> Results
-
-Create a new Results object. If `alpha_changed` is false and `old_res` is provided and
-dimensions match, reuse `α_policy`, `ψ_bottom`, and `ψ_top` from `old_res` to avoid
-unnecessary recomputation in practice (the constructor computes them anyway, so we overwrite).
-"""
-function fresh_results(prim::Primitives, old_res::Results=nothing; alpha_changed::Union{Bool,Nothing}=nothing)
-    need_alpha = alpha_changed === nothing ? (old_res === nothing ? true : false) : alpha_changed
-    new_res = Results(prim)
-    if !need_alpha && old_res !== nothing
-        same_dims = size(new_res.α_policy) == size(old_res.α_policy)
-        if same_dims
-            new_res.α_policy .= old_res.α_policy
-            new_res.ψ_bottom = copy(old_res.ψ_bottom)
-            new_res.ψ_top = copy(old_res.ψ_top)
-        end
-    end
-    return new_res
-end
-
-"""
-    update_params_and_resolve!(prim::Primitives, res::Results; kwargs...)
+    update_params_and_resolve(prim::Primitives, res::Results; kwargs...)
 
 Convenience wrapper: update primitives, build a fresh Results (reusing α when allowed),
 then solve. Returns `(prim, new_res)`.
 """
-function update_params_and_resolve!(prim::Primitives, res::Results; kwargs...)
+function update_params_and_resolve(prim::Primitives, res::Results; params_to_update=Dict() , kwargs...)
     KW = Dict(kwargs)
-    flags = update_primitives!(prim; kwargs...)
-    new_res = fresh_results(prim, res; alpha_changed=flags.recompute_alpha)
-    tol        = 1e-7
-    max_iter   = 10000
-    verbose    = false
-    λ_S        = 0.01
-    λ_u        = 0.01
-    solve_model(prim, new_res; tol=tol, max_iter=max_iter, verbose=verbose, λ_S=λ_S, λ_u=λ_u)
-    return prim, new_res
+    new_prim, new_res = update_primitives_results(prim, res, params_to_update; kwargs...)
+    tol        = get(KW, :tol, 1e-7)
+    max_iter   = get(KW, :max_iter, 25000)
+    verbose    = get(KW, :verbose, false)
+    λ_S        = get(KW, :λ_S, 0.01)
+    λ_u        = get(KW, :λ_u, 0.01)
+    solve_model(new_prim, new_res; tol=tol, max_iter=max_iter, verbose=verbose, λ_S=λ_S, λ_u=λ_u)
+    return new_prim, new_res
 end
 
 """
-    compute_model_moments(prim::Primitives, res::Results) -> NamedTuple
+_zero_moments(θ::T) where {T<:Real}
 
-Compute model-implied moments from the steady-state cross-section of employed workers.
-
-Returns:
-- mean_logwage: E[log w*] under the distribution n(h, ψ)
-- var_logwage: Var[log w*] under the distribution n(h, ψ)
-- mean_logwage_inperson: E[log w* | α* ≈ 0]
-- mean_logwage_remote:   E[log w* | α* ≈ 1]
-- diff_logwage_inperson_remote: difference of the above two means
-- hybrid_share: total mass of employed workers with interior α* (0 < α* < 1)
-- agg_productivity: E[Y(h, ψ, α*)] weighted by n(h, ψ)
-- dlogw_dpsi_mean_RH: E[(1/w) ∂w*/∂ψ | α*>0]
-- mean_logwage_RH_lowpsi: E[log w* | ψ in bottom quantile, α*>0]
-- mean_logwage_RH_highpsi: E[log w* | ψ in top quantile, α*>0]
-- diff_logwage_RH_high_lowpsi: Difference between the two above (High − Low)
-- mean_alpha_highpsi: E[α* | ψ in top quantile]
-- mean_alpha_lowpsi: E[α* | ψ in bottom quantile]
-- diff_alpha_high_lowpsi: Difference in α* means (High − Low)
-- var_logwage_highpsi: Var[log w* | ψ in top quantile]
-- var_logwage_lowpsi: Var[log w* | ψ in bottom quantile]
-- ratio_var_logwage_high_lowpsi: var_high / var_low (0.0 if var_low==0)
-- market_tightness: θ (market tightness)
+Return a NamedTuple of zero-initialized moment statistics, with market_tightness set to θ.
 """
-
+function _zero_moments(θ::T)::NamedTuple where {T<:Real}
+    return (
+        mean_logwage = 0.0, var_logwage = 0.0, mean_logwage_inperson = 0.0,
+        mean_logwage_remote = 0.0, diff_logwage_inperson_remote = 0.0, hybrid_share = 0.0,
+        agg_productivity = 0.0, dlogw_dpsi_mean_RH = 0.0, mean_logwage_RH_lowpsi = 0.0,
+        mean_logwage_RH_highpsi = 0.0, diff_logwage_RH_high_lowpsi = 0.0, 
+        mean_alpha_highpsi = 0.0, mean_alpha_lowpsi = 0.0, diff_alpha_high_lowpsi = 0.0,
+        var_logwage_highpsi = 0.0, var_logwage_lowpsi = 0.0, 
+        ratio_var_logwage_high_lowpsi = 0.0, market_tightness = θ,
+    )
+end
 
 """
-    compute_model_moments(prim::Primitives, res::Results; q_low_cut=0.25, q_high_cut=0.75) -> NamedTuple{(:mean_logwage, :var_logwage, :mean_logwage_inperson, :mean_logwage_remote, :diff_logwage_inperson_remote, :hybrid_share, :agg_productivity, :dlogw_dpsi_mean_RH, :mean_logwage_RH_lowpsi, :mean_logwage_RH_highpsi, :diff_logwage_RH_high_lowpsi, :mean_alpha_highpsi, :mean_alpha_lowpsi, :diff_alpha_high_lowpsi, :var_logwage_highpsi, :var_logwage_lowpsi, :ratio_var_logwage_high_lowpsi, :market_tightness), NTuple{18, Float64}}
+_compute_mean_var(sum_x, sum_x2, sum_wts)
 
-Compute model-implied moments from the steady-state cross-section of employed workers.
+Compute the weighted mean μ and non-negative variance σ² from the sums:
+μ = sum_x / sum_wts, σ² = max(0.0, (sum_x2 / sum_wts) - μ^2).
 
-## Economic Interpretation:
-- **Log wage moments**: Capture wage dispersion and sorting patterns across worker-firm matches
-- **Work arrangement moments**: Measure remote/hybrid adoption and its wage premium/penalty
-- **Firm productivity grouping**: Tests model's predictions about high-ψ vs low-ψ firm behavior
-- **Derivative moment**: Captures wage-productivity elasticity among flexible arrangements
+Arguments
+- sum_x: sum of weighted observations
+- sum_x2: sum of squared weighted observations
+- sum_wts: sum of weights
 
-## Returns:
-Comprehensive set of theoretical moments for structural estimation, including unconditional
-wage statistics, conditional moments by work arrangement and firm type, and market aggregates.
+Returns
+- (μ, σ²) as a tuple; returns (0.0, 0.0) if sum_wts <= 0.
+"""
+function _compute_mean_var(sum_x::T, sum_x2::T, sum_wts::T)::Tuple{T, T} where {T<:Real}
+    if ForwardDiff.value(sum_wts) > 0
+        μ = sum_x / sum_wts
+        σ2 = max(0.0, (sum_x2 / sum_wts) - μ^2)
+        return μ, σ2
+    else
+        return 0.0, 0.0
+    end
+end
+
+"""Return the index of the first entry in `cdf` whose ForwardDiff.value >= ForwardDiff.value(quantile); if none is found, return `n`."""
+function _find_quantile_index(cdf::Vector{T}, quantile::T, n::Int)::Int where {T<:Real}
+    idx = findfirst(>=(ForwardDiff.value(quantile)), ForwardDiff.value.(cdf))
+    return idx === nothing ? n : idx
+end
+
+"""
+    compute_model_moments(prim::Primitives{T}, res::Results{T}; q_low_cut::T=0.25, q_high_cut::T=0.75) where {T<:Real}
+
+Compute a set of economy-level and conditional moments from an equilibrium employment
+distribution and associated policy functions. This function performs a single pass
+over the discrete grid of worker skill `h_grid` and remote efficiency `ψ_grid`
+contained in `prim`, weighting cell-level quantities by employment `n(h,ψ)` from
+`res`. The returned moments are useful for model calibration and first-stage
+identification of firm heterogeneity.
+
+Arguments
+- `prim::Primitives{T}`: model primitives and grids. Expected fields (used by the
+    implementation): `h_grid`, `ψ_grid`, `ψ_cdf`, `production_fun`, `A₁`, `ψ₀`,
+    `ϕ`, `ν`, `χ`, `ξ`, `β`, `δ`. `production_fun(h,ψ,α)` should return total output
+    produced by a worker of skill `h` at firm-type `ψ` when the firm uses arrangement
+    `α`.
+- `res::Results{T}`: equilibrium objects. Expected fields: `n` (employment matrix
+    sized `(length(h_grid), length(ψ_grid))`), `w_policy` (equilibrium wages matrix),
+    `α_policy` (optimal arrangement matrix), and `θ` (market tightness / matching
+    object returned unmodified in the output).
+- `q_low_cut`, `q_high_cut` (optional): quantile cutoffs in (0,1) used to define
+    "low-ψ" and "high-ψ" firm groups for first-stage moments (defaults 0.25 and 0.75).
+    Indices are found using `_find_quantile_index(ψ_cdf, q, n_ψ)`.
+
+Behavior and numerical details
+- The function is AD-friendly: it often unwraps Dual numbers via `ForwardDiff.value`
+    when classifying arrangement types using a small tolerance `αtol = 1e-8`.
+- Cells with zero employment are skipped entirely.
+- Cells with non-positive wages are excluded from wage-based moments but still
+    contribute to arrangement (`α`) moments and employment counts for ψ-group
+    aggregates.
+- Arrangement classification:
+    - "in-person" if α ≈ 0 (<= αtol)
+    - "remote" if α ≈ 1 (>= 1-αtol)
+    - "interior" (hybrid) if α in (αtol, 1-αtol)
+    - "RH" denotes remote or hybrid (α > αtol).
+- The routine computes an approximate wage response to firm productivity for
+    remote/hybrid cells using the analytic derivative implied by the model:
+    dw/dψ = A₁ * h * (∂g/∂ψ) * [ ξ α / (1 - β(1-δ)) - (1-α)/χ ],
+    and accumulates ∂log w / ∂ψ = (dw/dψ)/w for RH cells.
+- Final means/variances are computed by `_compute_mean_var(sum_logw, sum_logw2, sum_wts)`.
+- Degenerate case: if total employment is zero the function returns
+    `_zero_moments(res.θ)`.
+
+Returned named tuple (employment-weighted where appropriate)
+- `mean_logwage` : overall mean of log wages (over employed workers with positive wage)
+- `var_logwage`  : variance of log wages
+- `mean_logwage_inperson` : mean log wage for in-person-only jobs
+- `mean_logwage_remote`   : mean log wage for remote-only jobs
+- `diff_logwage_inperson_remote` : difference (inperson − remote)
+- `hybrid_share` : share of employment in interior/hybrid arrangements (α strictly between 0 and 1)
+- `agg_productivity` : aggregate productivity per worker (employment-weighted average of `production_fun`)
+- `dlogw_dpsi_mean_RH` : mean ∂log w / ∂ψ among remote or hybrid workers
+- `mean_logwage_RH_lowpsi`, `mean_logwage_RH_highpsi` :
+    mean log wages for RH workers in the low- and high-ψ groups respectively
+- `diff_logwage_RH_high_lowpsi` : difference between high- and low-ψ RH mean log wages
+- `mean_alpha_highpsi`, `mean_alpha_lowpsi` : employment-weighted mean α in high- and low-ψ groups
+- `diff_alpha_high_lowpsi` : difference (high − low) of mean α
+- `var_logwage_highpsi`, `var_logwage_lowpsi` : within-group wage variances (high / low ψ)
+- `ratio_var_logwage_high_lowpsi` : ratio var_high / var_low (safe-guarded against division by zero)
+- `market_tightness` : returned as `res.θ`
+
+Complexity and implementation notes
+- Time complexity is O(|h_grid| * |ψ_grid|) due to the double loop over the grid.
+- Uses employment `n(h,ψ)` as weights for all aggregated statistics.
+- Quantile boundaries are chosen so that the low and high groups do not overlap; the
+    high-group start index is forced to be at least one above the low-group end.
+- Numerical safeguards avoid division by zero (checks sum of weights before dividing).
+- Designed to work with ForwardDiff dual numbers by unwrapping only where needed
+    (classification and final scalar guards), while preserving differentiability of
+    accumulated quantities where appropriate.
+
+Usage
+Place this docstring immediately above the `compute_model_moments` function definition.
 """
 function compute_model_moments(
-    prim::Primitives, 
-    res::Results;
-    q_low_cut::Float64=0.25, 
-    q_high_cut::Float64=0.75
-)::NamedTuple{(:mean_logwage, :var_logwage, :mean_logwage_inperson, :mean_logwage_remote, 
-              :diff_logwage_inperson_remote, :hybrid_share, :agg_productivity, :dlogw_dpsi_mean_RH, 
-              :mean_logwage_RH_lowpsi, :mean_logwage_RH_highpsi, :diff_logwage_RH_high_lowpsi, 
-              :mean_alpha_highpsi, :mean_alpha_lowpsi, :diff_alpha_high_lowpsi, 
-              :var_logwage_highpsi, :var_logwage_lowpsi, :ratio_var_logwage_high_lowpsi, 
-              :market_tightness), NTuple{18, Float64}}
+                                prim::Primitives{T}, 
+                                res::Results{T};
+                                q_low_cut::T=0.5, 
+                                q_high_cut::T=0.75
+                            )::NamedTuple{(:mean_logwage, :var_logwage, :mean_logwage_inperson, :mean_logwage_remote, 
+                                        :diff_logwage_inperson_remote, :hybrid_share, :agg_productivity, :dlogw_dpsi_mean_RH, 
+                                        :mean_logwage_RH_lowpsi, :mean_logwage_RH_highpsi, :diff_logwage_RH_high_lowpsi, 
+                                        :mean_alpha_highpsi, :mean_alpha_lowpsi, :diff_alpha_high_lowpsi, 
+                                        :var_logwage_highpsi, :var_logwage_lowpsi, :ratio_var_logwage_high_lowpsi, 
+                                        :market_tightness), NTuple{18, T}} where {T<:Real}
 
     # Extract key objects
-    n::Matrix{Float64} = res.n           # Employment distribution n(h,ψ) 
-    w::Matrix{Float64} = res.w_policy    # Equilibrium wages w*(h,ψ)
-    α::Matrix{Float64} = res.α_policy    # Optimal work arrangements α*(h,ψ)
+    n::Matrix{T} = res.n           # Employment distribution n(h,ψ) 
+    w::Matrix{T} = res.w_policy    # Equilibrium wages w*(h,ψ)
+    α::Matrix{T} = res.α_policy    # Optimal work arrangements α*(h,ψ)
     
-    @unpack h_grid, ψ_grid, ψ_cdf, production_fun, A₁, ψ₀, ϕ, ν, χ, ξ, β, δ = prim
+    @unpack h_grid, ψ_grid, ψ_cdf, A₁, ψ₀, ϕ, ν, χ, ξ, β, δ = prim
+    production_fun = (h, ψ, α) -> (prim.A₀ + prim.A₁*h) * ((1 - α) + α * (prim.ψ₀ * h^prim.ϕ * ψ^prim.ν))
+    utility_fun    = (w, α)    -> w - prim.c₀ * (1 - α)^(prim.χ + 1) / (prim.χ + 1)
+    matching_fun   = (V, U)    -> prim.γ₀ * U^prim.γ₁ * V^(1 - prim.γ₁)
 
-    total_emp::Float64 = sum(n)
-    
+    total_emp::T = sum(n)
+
     # Early return for degenerate case
-    if !(total_emp > 0)
+    if !(ForwardDiff.value(total_emp) > 0)
         return _zero_moments(res.θ)
     end
 
@@ -193,52 +304,52 @@ function compute_model_moments(
 
     # Initialize all accumulators for single-pass computation
     # Unconditional wage moments
-    sum_wts::Float64 = 0.0
-    sum_logw::Float64 = 0.0
-    sum_logw2::Float64 = 0.0
-    
-    # Work arrangement conditional moments  
-    sum_n_inperson::Float64 = 0.0; sum_logw_inperson::Float64 = 0.0
-    sum_n_remote::Float64 = 0.0; sum_logw_remote::Float64 = 0.0
-    sum_n_interior::Float64 = 0.0  # Hybrid workers (0 < α* < 1)
-    
+    sum_wts::T = 0.0
+    sum_logw::T = 0.0
+    sum_logw2::T = 0.0
+
+    # Work arrangement conditional moments
+    sum_n_inperson::T = 0.0; sum_logw_inperson::T = 0.0
+    sum_n_remote::T = 0.0; sum_logw_remote::T = 0.0
+    sum_n_interior::T = 0.0  # Hybrid workers (0 < α* < 1)
+
     # Productivity moment
-    sum_production::Float64 = 0.0
-    
+    sum_production::T = 0.0
+
     # Wage-productivity elasticity among remote/hybrid workers
     # Economic interpretation: ∂log(w)/∂ψ measures how responsive wages are to firm 
     # productivity improvements, conditional on offering flexible work arrangements
-    sum_dlogw_dpsi_RH::Float64 = 0.0
-    sum_n_RH::Float64 = 0.0
+    sum_dlogw_dpsi_RH::T = 0.0
+    sum_n_RH::T = 0.0
     
     # ψ-group conditional moments (for first-stage estimation)
     # Low-ψ firms (bottom quantile)
-    sum_n_low::Float64 = 0.0; sum_alpha_low::Float64 = 0.0
-    sum_logw_low::Float64 = 0.0; sum_logw2_low::Float64 = 0.0
-    sum_logw_RH_low::Float64 = 0.0; sum_n_RH_low::Float64 = 0.0
-    
-    # High-ψ firms (top quantile) 
-    sum_n_high::Float64 = 0.0; sum_alpha_high::Float64 = 0.0
-    sum_logw_high::Float64 = 0.0; sum_logw2_high::Float64 = 0.0
-    sum_logw_RH_high::Float64 = 0.0; sum_n_RH_high::Float64 = 0.0
+    sum_n_low::T = 0.0; sum_alpha_low::T = 0.0
+    sum_logw_low::T = 0.0; sum_logw2_low::T = 0.0
+    sum_logw_RH_low::T = 0.0; sum_n_RH_low::T = 0.0
+
+    # High-ψ firms (top quantile)
+    sum_n_high::T = 0.0; sum_alpha_high::T = 0.0
+    sum_logw_high::T = 0.0; sum_logw2_high::T = 0.0
+    sum_logw_RH_high::T = 0.0; sum_n_RH_high::T = 0.0
 
     # Single pass through all (h,ψ) combinations
     for (i_h, h) in enumerate(h_grid)
         for (i_ψ, ψ) in enumerate(ψ_grid)
-            n_cell::Float64 = n[i_h, i_ψ]
+            n_cell::T = n[i_h, i_ψ]
             
             # Skip zero-employment cells
             n_cell > 0.0 || continue
-            
-            w_cell::Float64 = w[i_h, i_ψ]
-            α_cell::Float64 = α[i_h, i_ψ]
-            
+
+            w_cell::T = w[i_h, i_ψ]
+            α_cell::T = α[i_h, i_ψ]
+
             # Determine cell characteristics
             is_valid::Bool = valid[i_h, i_ψ]  # Positive wage
-            is_inperson::Bool = α_cell <= αtol
-            is_remote::Bool = α_cell >= (1.0 - αtol) 
-            is_interior::Bool = (α_cell > αtol) && (α_cell < (1.0 - αtol))
-            is_RH::Bool = α_cell > αtol  # Remote or hybrid
+            is_inperson::Bool = ForwardDiff.value(α_cell) <= αtol
+            is_remote::Bool = ForwardDiff.value(α_cell) >= (1.0 - αtol) 
+            is_interior::Bool = (ForwardDiff.value(α_cell) > αtol) && (ForwardDiff.value(α_cell) < (1.0 - αtol))
+            is_RH::Bool = ForwardDiff.value(α_cell) > αtol  # Remote or hybrid
             is_low_psi::Bool = i_ψ <= idx_low_end
             is_high_psi::Bool = i_ψ >= idx_high_start
 
@@ -262,7 +373,7 @@ function compute_model_moments(
                 continue
             end
             
-            logw_cell::Float64 = log(w_cell)
+            logw_cell::T = log(w_cell)
             
             # Unconditional wage moments (all valid employed workers)
             sum_wts += n_cell
@@ -287,12 +398,12 @@ function compute_model_moments(
             # This captures how wage responds to firm productivity for flexible arrangements
             if is_RH
                 # Marginal productivity of firm type: ∂g/∂ψ where g(h,ψ) = ψ₀h^ϕψ^ν
-                dg_dpsi::Float64 = ψ₀ * (h^ϕ) * (ν * ψ^(ν - 1))
-                
+                dg_dpsi::T = ψ₀ * (h^ϕ) * (ν * ψ^(ν - 1))
+
                 # Wage derivative incorporating Nash bargaining and arrangement costs
                 # First term: remote productivity advantage (ξ = remote productivity factor)
                 # Second term: arrangement cost savings (χ = cost elasticity parameter)
-                dw_dpsi::Float64 = A₁ * h * dg_dpsi * (
+                dw_dpsi::T = A₁ * h * dg_dpsi * (
                     (ξ * α_cell) / (1.0 - β * (1.0 - δ)) - (1.0 - α_cell) / χ
                 )
                 
@@ -328,118 +439,50 @@ function compute_model_moments(
     end
 
     # Compute final moments with numerical safeguards
-    mean_logwage::Float64, var_logwage::Float64 = _compute_mean_var(sum_logw, sum_logw2, sum_wts)
-    
-    mean_logwage_inperson::Float64 = sum_n_inperson > 0 ? sum_logw_inperson / sum_n_inperson : 0.0
-    mean_logwage_remote::Float64 = sum_n_remote > 0 ? sum_logw_remote / sum_n_remote : 0.0
-    diff_logwage_inperson_remote::Float64 = mean_logwage_inperson - mean_logwage_remote
-    
-    hybrid_share::Float64 = sum_n_interior / total_emp
-    agg_productivity::Float64 = sum_production / total_emp
-    dlogw_dpsi_mean_RH::Float64 = sum_n_RH > 0 ? sum_dlogw_dpsi_RH / sum_n_RH : 0.0
-    
+    mean_logwage::T, var_logwage::T = _compute_mean_var(sum_logw, sum_logw2, sum_wts)
+
+    mean_logwage_inperson::T = ForwardDiff.value(sum_n_inperson) > 0 ? sum_logw_inperson / sum_n_inperson : 0.0
+    mean_logwage_remote::T = ForwardDiff.value(sum_n_remote) > 0 ? sum_logw_remote / sum_n_remote : 0.0
+    diff_logwage_inperson_remote::T = mean_logwage_inperson - mean_logwage_remote
+
+    hybrid_share::T = ForwardDiff.value(sum_n_interior) / ForwardDiff.value(total_emp)
+    agg_productivity::T = ForwardDiff.value(sum_production) / ForwardDiff.value(total_emp)
+    dlogw_dpsi_mean_RH::T = ForwardDiff.value(sum_n_RH) > 0 ? sum_dlogw_dpsi_RH / sum_n_RH : 0.0
+
     # First-stage moments for firm heterogeneity identification
-    mean_logwage_RH_lowpsi::Float64 = sum_n_RH_low > 0 ? sum_logw_RH_low / sum_n_RH_low : 0.0
-    mean_logwage_RH_highpsi::Float64 = sum_n_RH_high > 0 ? sum_logw_RH_high / sum_n_RH_high : 0.0
-    diff_logwage_RH_high_lowpsi::Float64 = mean_logwage_RH_highpsi - mean_logwage_RH_lowpsi
+    mean_logwage_RH_lowpsi::T = ForwardDiff.value(sum_n_RH_low) > 0 ? sum_logw_RH_low / sum_n_RH_low : 0.0
+    mean_logwage_RH_highpsi::T = ForwardDiff.value(sum_n_RH_high) > 0 ? sum_logw_RH_high / sum_n_RH_high : 0.0
+    diff_logwage_RH_high_lowpsi::T = mean_logwage_RH_highpsi - mean_logwage_RH_lowpsi
+
+    mean_alpha_lowpsi::T = ForwardDiff.value(sum_n_low) > 0 ? sum_alpha_low / sum_n_low : 0.0
+    mean_alpha_highpsi::T = ForwardDiff.value(sum_n_high) > 0 ? sum_alpha_high / sum_n_high : 0.0
+    diff_alpha_high_lowpsi::T = mean_alpha_highpsi - mean_alpha_lowpsi
     
-    mean_alpha_lowpsi::Float64 = sum_n_low > 0 ? sum_alpha_low / sum_n_low : 0.0
-    mean_alpha_highpsi::Float64 = sum_n_high > 0 ? sum_alpha_high / sum_n_high : 0.0
-    diff_alpha_high_lowpsi::Float64 = mean_alpha_highpsi - mean_alpha_lowpsi
-    
-    _, var_logwage_lowpsi::Float64 = _compute_mean_var(sum_logw_low, sum_logw2_low, sum_n_low)
-    _, var_logwage_highpsi::Float64 = _compute_mean_var(sum_logw_high, sum_logw2_high, sum_n_high)
-    ratio_var_logwage_high_lowpsi::Float64 = var_logwage_lowpsi > 0 ? var_logwage_highpsi / var_logwage_lowpsi : 0.0
+    _, var_logwage_lowpsi::T = _compute_mean_var(sum_logw_low, sum_logw2_low, sum_n_low)
+    _, var_logwage_highpsi::T = _compute_mean_var(sum_logw_high, sum_logw2_high, sum_n_high)
+    ratio_var_logwage_high_lowpsi::T = ForwardDiff.value(var_logwage_lowpsi) > 0 ? var_logwage_highpsi / var_logwage_lowpsi : 0.0
 
     return (
-        mean_logwage = mean_logwage,
-        var_logwage = var_logwage,
-        mean_logwage_inperson = mean_logwage_inperson,
-        mean_logwage_remote = mean_logwage_remote,
-        diff_logwage_inperson_remote = diff_logwage_inperson_remote,
-        hybrid_share = hybrid_share,
-        agg_productivity = agg_productivity,
-        dlogw_dpsi_mean_RH = dlogw_dpsi_mean_RH,
-        mean_logwage_RH_lowpsi = mean_logwage_RH_lowpsi,
-        mean_logwage_RH_highpsi = mean_logwage_RH_highpsi,
-        diff_logwage_RH_high_lowpsi = diff_logwage_RH_high_lowpsi,
-        mean_alpha_highpsi = mean_alpha_highpsi,
-        mean_alpha_lowpsi = mean_alpha_lowpsi,
-        diff_alpha_high_lowpsi = diff_alpha_high_lowpsi,
-        var_logwage_highpsi = var_logwage_highpsi,
-        var_logwage_lowpsi = var_logwage_lowpsi,
-        ratio_var_logwage_high_lowpsi = ratio_var_logwage_high_lowpsi,
-        market_tightness = res.θ,
+        mean_logwage = mean_logwage,                                                #> Average of log(wages)
+        var_logwage = var_logwage,                                                  #> Variance of log(wages)
+        mean_logwage_inperson = mean_logwage_inperson,                              #> Average of log(wages) for in-person workers
+        mean_logwage_remote = mean_logwage_remote,                                  #> Average of log(wages) for remote workers
+        diff_logwage_inperson_remote = diff_logwage_inperson_remote,                #> Difference in average log(wages) between in-person and remote workers
+        hybrid_share = hybrid_share,                                                #> Share of hybrid workers
+        agg_productivity = agg_productivity,                                        #> Aggregate productivity
+        dlogw_dpsi_mean_RH = dlogw_dpsi_mean_RH,                                    #> Elasticity of log(wages) with respect to market tightness for remote workers
+        mean_logwage_RH_lowpsi = mean_logwage_RH_lowpsi,                            #> Average of log(wages) for remote workers in low-psi region
+        mean_logwage_RH_highpsi = mean_logwage_RH_highpsi,                          #> Average of log(wages) for remote workers in high-psi region
+        diff_logwage_RH_high_lowpsi = diff_logwage_RH_high_lowpsi,                  #> Difference in average log(wages) between high-psi and low-psi regions
+        mean_alpha_highpsi = mean_alpha_highpsi,                                    #> Average of alpha for remote workers in high-psi region
+        mean_alpha_lowpsi = mean_alpha_lowpsi,                                      #> Average of alpha for remote workers in low-psi region
+        diff_alpha_high_lowpsi = diff_alpha_high_lowpsi,                            #> Difference in average alpha between high-psi and low-psi regions
+        var_logwage_highpsi = var_logwage_highpsi,                                  #> Variance of log(wages) for remote workers in high-psi region
+        var_logwage_lowpsi = var_logwage_lowpsi,                                    #> Variance of log(wages) for remote workers in low-psi region
+        ratio_var_logwage_high_lowpsi = ratio_var_logwage_high_lowpsi,              #> Ratio of variances of log(wages) between high-psi and low-psi regions
+        market_tightness = res.θ,               #
     )
 end
-
-# Helper functions for cleaner code
-function _zero_moments(θ::Float64)::NamedTuple
-    return (
-        mean_logwage = 0.0, var_logwage = 0.0, mean_logwage_inperson = 0.0,
-        mean_logwage_remote = 0.0, diff_logwage_inperson_remote = 0.0, hybrid_share = 0.0,
-        agg_productivity = 0.0, dlogw_dpsi_mean_RH = 0.0, mean_logwage_RH_lowpsi = 0.0,
-        mean_logwage_RH_highpsi = 0.0, diff_logwage_RH_high_lowpsi = 0.0, 
-        mean_alpha_highpsi = 0.0, mean_alpha_lowpsi = 0.0, diff_alpha_high_lowpsi = 0.0,
-        var_logwage_highpsi = 0.0, var_logwage_lowpsi = 0.0, 
-        ratio_var_logwage_high_lowpsi = 0.0, market_tightness = θ,
-    )
-end
-
-function _find_quantile_index(cdf::Vector{Float64}, quantile::Float64, n::Int)::Int
-    idx = findfirst(>=(quantile), cdf)
-    return idx === nothing ? n : idx
-end
-
-function _compute_mean_var(sum_x::Float64, sum_x2::Float64, sum_wts::Float64)::Tuple{Float64, Float64}
-    if sum_wts > 0
-        μ = sum_x / sum_wts
-        σ2 = max(0.0, (sum_x2 / sum_wts) - μ^2)
-        return μ, σ2
-    else
-        return 0.0, 0.0
-    end
-end
-
-"""
-    estimation_objective(prim, res; data_moments::NamedTuple, kwargs...)
-
-Update parameters (via kwargs), resolve, compute model moments, and return a simple
-least-squares objective vs provided `data_moments`.
-"""
-function estimation_objective(prim::Primitives, res::Results; data_moments::NamedTuple, kwargs...)
-    # If no overrides, use the current solution `res` directly to avoid drift.
-    if length(kwargs) == 0
-        model_moments = compute_model_moments(prim, res)
-        keys = fieldnames(typeof(data_moments))
-        return sum((getfield(model_moments, k) - getfield(data_moments, k))^2 for k in keys)
-    end
-
-    # With overrides: temporarily update primitives, resolve, compute, then restore.
-    KW = Dict(kwargs)
-    prim_fields = Set(fieldnames(Primitives))
-    saved = Dict{Symbol,Any}()
-    for (k, _) in KW
-        if k in prim_fields
-            saved[k] = getfield(prim, k)
-        end
-    end
-
-    try
-        _, res_new = update_params_and_resolve!(prim, res; kwargs...)
-        model_moments = compute_model_moments(prim, res_new)
-    finally
-        # Restore primitive fields and rebuild closures if needed
-        if !isempty(saved)
-            update_primitives!(prim; saved...)
-        end
-    end
-
-    keys = fieldnames(typeof(data_moments))
-    return sum((getfield(model_moments, k) - getfield(data_moments, k))^2 for k in keys)
-end
-
-using YAML
 
 """
     save_moments_to_yaml(moments::NamedTuple, filename::String)
@@ -470,7 +513,10 @@ end
 Create perturbed parameter values for testing parameter recovery.
 Returns a dictionary of parameter perturbations.
 """
-function perturb_parameters(prim::Primitives; scale::Float64=0.1)
+function perturb_parameters(prim::Primitives;
+                            param_list::Vector{Symbol} = Symbol[],
+                            scale::Float64=0.1)
+    
     # Key parameters to perturb for testing
     params = Dict{Symbol, Float64}()
     
@@ -480,9 +526,9 @@ function perturb_parameters(prim::Primitives; scale::Float64=0.1)
     params[:ν] = max(0.1, prim.ν * (1.0 + scale * randn()))
     
     # Human capital distribution
-    params[:a_h] = max(0.5, prim.a_h * (1.0 + scale * randn()))
-    params[:b_h] = max(0.5, prim.b_h * (1.0 + scale * randn()))
-    
+    params[:aₕ] = max(0.5, prim.aₕ * (1.0 + scale * randn()))
+    params[:bₕ] = max(0.5, prim.bₕ * (1.0 + scale * randn()))
+
     # Cost parameters
     params[:χ] = max(0.1, prim.χ * (1.0 + scale * randn()))
     params[:c₀] = max(0.01, prim.c₀ * (1.0 + scale * randn()))
@@ -498,145 +544,115 @@ function perturb_parameters(prim::Primitives; scale::Float64=0.1)
     return params
 end
 
+
 """
-    simple_estimation(prim::Primitives, res::Results, target_moments::NamedTuple;
-                      max_iter::Int=50, step_size::Float64=0.01, tol::Float64=1e-4,
-                      seed::Union{Int,Nothing}=nothing, step_decay::Float64=0.95,
-                      decay_every::Int=50, min_step_size::Float64=1e-4,
-                      verbose::Bool=true) -> Dict
+    compute_distance(model_moments::NamedTuple, data_moments::NamedTuple;
+                        weighting_matrix::Union{Matrix, Nothing}=nothing,
+                        matrix_moment_order::Union{Vector{Symbol}, Nothing}=nothing)
 
-Simple gradient-free estimation using random search with step-size annealing.
-- step_size: std dev of relative multiplicative perturbations per proposal.
-- step_decay: multiplicative decay factor applied every `decay_every` iters.
-- min_step_size: lower bound for the annealed step size.
-- seed: set RNG seed for reproducibility when provided.
+Compute a scalar distance between `model_moments` and `data_moments`.
+
+Description
+- Builds an error vector `g` containing the elementwise differences `model_moments[k] - data_moments[k]`
+    for each key `k` in `model_moments` (the key iteration order of the `NamedTuple` determines the order of `g`).
+- If `weighting_matrix` is `nothing`, the function returns the unweighted sum of squared errors: dot(g, g).
+- If a `weighting_matrix` is provided, the function returns the quadratic form g' * W * g.
+- If `matrix_moment_order` is supplied and differs from the current moment order, the weighting matrix
+    is permuted to align with the ordering used to construct `g`.
+
+Arguments
+- `model_moments::NamedTuple` : Named tuple of model-implied moments (keys are moment names).
+- `data_moments::NamedTuple`  : Named tuple of data moments with the same keys as `model_moments`.
+- `weighting_matrix::Union{Matrix, Nothing}` (keyword, default `nothing`) :
+    - If `nothing`, compute and return the unweighted sum of squared errors.
+    - Otherwise a square matrix (typically symmetric) used to weight the moment errors.
+- `matrix_moment_order::Union{Vector{Symbol}, Nothing}` (keyword, default `nothing`) :
+    - When provided, this vector specifies the moment names in the order that the rows/columns of
+    `weighting_matrix` correspond to. If it differs from the `NamedTuple` key order, the function
+    will permute `weighting_matrix` so its order matches the `NamedTuple` keys before forming g' * W * g.
+
+Returns
+- A scalar (numeric) distance value:
+    - `dot(g, g)` when no weighting matrix is provided.
+    - `g' * W * g` when a weighting matrix is provided (after any required permutation).
+
+Notes and requirements
+- `data_moments` must contain the same keys as `model_moments`. The ordering of keys in `model_moments`
+    determines the layout of the error vector `g`.
+- If `matrix_moment_order` is provided, it must contain exactly the same set of symbols as the
+`NamedTuple` keys (possibly in a different order) and have length equal to `size(weighting_matrix, 1)`.
+- The weighting matrix should be square and conformable with the length of `g`. Typical usage assumes
+    symmetric positive-definite weighting matrices, but the function will compute g' * W * g for any
+    conformable numeric matrix.
+- Mismatched sizes or missing keys will result in a runtime error.
+
+Examples
+- Unweighted distance:
+    model = (m1=1.0, m2=2.0)
+    data  = (m1=0.8, m2=2.1)
+    compute_distance(model, data)         # returns 0.2^2 + (-0.1)^2
+
+- Weighted distance with permutation:
+    W = ...                              # 2×2 weighting matrix ordered as [:m2, :m1]
+    compute_distance(model, data, W, [:m2, :m1])
 """
-function simple_estimation(prim::Primitives, res::Results, target_moments::NamedTuple;
-                           max_iter::Int=50, step_size::Float64=0.01, tol::Float64=1e-4,
-                           seed::Union{Int,Nothing}=nothing, step_decay::Float64=0.95,
-                           decay_every::Int=50, min_step_size::Float64=1e-4,
-                           verbose::Bool=true)
+function compute_distance(
+                            model_moments::NamedTuple, 
+                            data_moments::NamedTuple,
+                            weighting_matrix::Union{Matrix, Nothing}=nothing,
+                            matrix_moment_order::Union{Vector{Symbol}, Nothing}=nothing
+                        )
+    
+    # Step 1: Get moment names and create the error vector `g`
+    moment_keys = keys(model_moments)
+    g = [model_moments[k] - data_moments[k] for k in moment_keys]
 
-    seed !== nothing && Random.seed!(seed)
-
-    # Initialize with current parameters
-    best_params = Dict{Symbol, Float64}(
-        :A₁ => prim.A₁, :ψ₀ => prim.ψ₀, :ν => prim.ν,
-        :a_h => prim.a_h, :b_h => prim.b_h,
-        :χ => prim.χ, :c₀ => prim.c₀
-    )
-
-    best_obj = estimation_objective(prim, res; data_moments=target_moments, best_params...)
-
-    if verbose
-        hdr = @sprintf("Random search (annealed) | init_step=%.5f | decay=%.3f/%d | min_step=%.5f",
-                       step_size, step_decay, decay_every, min_step_size)
-        printstyled("\n" * "="^80 * "\n"; color=:cyan, bold=true)
-        printstyled(hdr * "\n"; color=:cyan, bold=true)
-        seed !== nothing && printstyled(@sprintf("Seed = %d\n", seed); color=:light_black, bold=false)
-        printstyled(@sprintf("Initial objective: %.6e\n", best_obj); color=:magenta, bold=true)
-        printstyled("-"^80 * "\n"; color=:cyan)
+    # If no weighting matrix is provided, return the simple sum of squared errors
+    if isnothing(weighting_matrix)
+        return dot(g, g) # dot(g, g) is an efficient way to write g' * g
     end
 
-    cur_step = step_size
-
-    for iter in 1:max_iter
-        # Anneal step size
-        if decay_every > 0 && iter % decay_every == 0
-            new_step = max(min_step_size, cur_step * step_decay)
-            if verbose && new_step != cur_step
-                printstyled(@sprintf("Anneal @ iter %d: step_size %.6f → %.6f\n",
-                                     iter, cur_step, new_step); color=:yellow, bold=true)
-            end
-            cur_step = new_step
-        end
-
-        # Random perturbation around current best
-        candidate_params = copy(best_params)
-        for (k, v) in candidate_params
-            candidate_params[k] = max(0.01, v * (1.0 + cur_step * randn()))
-            # Keep ν above a softer lower bound (just in case)
-            if k == :ν
-                candidate_params[k] = max(0.05, candidate_params[k])
-            end
-        end
-
-        # Evaluate objective
-        try
-            obj = estimation_objective(prim, res; data_moments=target_moments, candidate_params...)
-
-            if obj < best_obj
-                best_params = candidate_params
-                best_obj = obj
-                if verbose
-                    printstyled(@sprintf("Iter %6d | New best obj = %.6e | step=%.6f\n",
-                                         iter, best_obj, cur_step); color=:green, bold=true)
-                end
-            else
-                if verbose && (iter % 50 == 0)
-                    printstyled(@sprintf("Iter %6d | obj = %.6e | step=%.6f\n",
-                                         iter, obj, cur_step); color=:blue, bold=false)
-                end
-            end
-
-            if best_obj < tol
-                if verbose
-                    printstyled(@sprintf("Converged at iter %d with obj = %.6e\n",
-                                         iter, best_obj); color=:green, bold=true)
-                    printstyled("="^80 * "\n"; color=:cyan, bold=true)
-                end
-                break
-            end
-        catch e
-            if verbose
-                printstyled(@sprintf("Iter %6d | proposal failed (%s)\n", iter, typeof(e)),
-                            color=:red, bold=true)
-            end
-            continue
-        end
+    # Step 2: Re-shuffle the weighting matrix if needed
+    current_moment_order = collect(moment_keys)
+    if !isnothing(matrix_moment_order) && current_moment_order != matrix_moment_order
+        perm_indices = indexin(current_moment_order, matrix_moment_order)
+        W = weighting_matrix[perm_indices, perm_indices]
+    else
+        W = weighting_matrix
     end
 
-    return Dict(:params => best_params, :objective => best_obj)
+    # Step 3: Return the final weighted distance
+    return g' * W * g 
 end
 
-"""
-    test_parameter_recovery(prim::Primitives, res::Results; verbose::Bool=true) -> Bool
+function objective_function(params, p)
+    # Unpack our fixed data and parameter names from `p`
+    prim_base = p.prim_base
+    res_base = p.res_base
+    target_moments = p.target_moments
+    param_names = p.param_names # e.g., [:A₁, :ν, :c₀]
+    weighting_matrix = p.weighting_matrix
+    matrix_moment_order = p.matrix_moment_order
+    fixed_point_options = get(p, :fixed_point_options, Dict())
 
-Full test: solve model, save moments, perturb parameters, then try to recover them.
-Returns true if recovery was successful (objective < tol), false otherwise.
-"""
-function test_parameter_recovery(prim::Primitives, res::Results; verbose::Bool=true, tol::Float64=1e-5)
-    # 1. Save current moments as "true" moments
-    true_moments = compute_model_moments(prim, res)
-    temp_file = "temp_target_moments.yaml"
-    save_moments_to_yaml(true_moments, temp_file)
-    
-    # 2. Perturb parameters
-    perturbed_params = perturb_parameters(prim; scale=0.15)
-    if verbose
-        println("Perturbed parameters:")
-        for (k, v) in perturbed_params
-            println("  $k: $(getfield(prim, k)) → $v")
-        end
-    end
-    
-    # 3. Apply perturbations
-    for (k, v) in perturbed_params
-        setfield!(prim, k, v)
-    end
-    
-    # 4. Try to recover
-    target_moments = load_moments_from_yaml(temp_file)
-    result = simple_estimation(prim, res, target_moments; max_iter=1000, step_size=0.001)
-    
-    # 5. Clean up
-    rm(temp_file, force=true)
-    
-    success = result[:objective] < tol
-    if verbose
-        println("Recovery $(success ? "PASSED" : "FAILED"): Final objective = $(round(result[:objective], digits=6))")
-    end
-    
-    return success
+    # --- Step 1: Update primitives ---
+    # Create a dictionary mapping param names to the new values from the optimizer
+    params_to_update = Dict(param_names .=> params)
+
+    # --- Step 2 update and re-solve the model ---
+    prim_new, res_new = update_params_and_resolve(
+                                                    prim_base, res_base; 
+                                                    params_to_update=params_to_update,
+                                                    fixed_point_options=fixed_point_options
+                                                )
+
+    # --- Step 3: Compute model moments ---
+    model_moments = compute_model_moments(prim_new, res_new)
+
+    # --- Step 4: Compute the distance ---
+    loss = compute_distance( model_moments, target_moments, weighting_matrix, matrix_moment_order )
+
+    return loss
 end
+
 

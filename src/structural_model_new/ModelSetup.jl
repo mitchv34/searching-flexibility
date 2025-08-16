@@ -4,69 +4,102 @@
 # Date: 2025-08-13
 # Description: Simplified model setup with hardcoded functional forms.
 ==========================================================================================#
-using Parameters, Roots, Random, YAML, Distributions, Term, OrderedCollections
+using YAML: yaml
+using Parameters, Roots, Random, YAML, Distributions, Term
+using ForwardDiff
+using OrderedCollections: OrderedDict
 include("helpers.jl") # Lean fit_kde_psi (pure Julia)
 #?=========================================================================================
 #? Model Data Structures
 #?=========================================================================================
-@with_kw mutable struct Primitives   
-    #> Functional form parameters (stored explicitly)
-    A₀::Float64
-    A₁::Float64
-    ψ₀::Float64
-    ϕ::Float64
-    ν::Float64
-    c₀::Float64
-    χ::Float64
-    γ₀::Float64
-    γ₁::Float64
-    #> Model functions (simple closures)
-    production_fun::Function  # Production function
-    utility_fun::Function     # Utility function
-    matching_fun::Function    # Matching function
-    #> Market parameters
-    κ₀::Float64     # Vacancy posting cost parameter
-    κ₁::Float64     # Vacancy posting cost parameter
-    β::Float64      # Time discount factor
-    δ::Float64      # Baseline job destruction rate
-    b::Float64      # Unemployment benefits
-    ξ::Float64      # Worker bargaining power
-    #> Grids
-    #* ψ_grid Remote productivity grid
-    n_ψ::Int64
-    ψ_min::Float64
-    ψ_max::Float64
-    ψ_grid::Vector{Float64}
-    ψ_pdf::Vector{Float64}
-    ψ_cdf::Vector{Float64}
-    #* h_grid Skill grid
-    aₕ::Float64 # Parameter of the Beta distribution of skill
-    bₕ::Float64 # Parameter of the Beta distribution of skill
-    n_h::Int64
-    h_min::Float64
-    h_max::Float64
-    h_grid::Vector{Float64}
-    h_pdf::Vector{Float64}
-    h_cdf::Vector{Float64}
-    #> Constructor with validation
-    function Primitives(args...)
-        prim = new(args...)
-        #?Validate parameter ranges
-        ## > Discount factor
-        if prim.β < 0 || prim.β > 1
-            throw(ArgumentError("β must be in [0,1]"))
-        end
-        ## > Destruction rate
-        if prim.δ < 0 || prim.δ > 1
-            throw(ArgumentError("δ must be in [0,1]"))
-        end
-        ## > Posting cost parameters
-        if prim.κ₀ < 0 || prim.κ₁ < 0
-            throw(ArgumentError("κ₀ and κ₁ must be non negative"))
-        end
-        return prim
-    end
+@with_kw struct Primitives{T<:Real}
+    # Functional form parameters
+    A₀::T
+    A₁::T
+    ψ₀::T
+    ϕ::T
+    ν::T
+    c₀::T
+    χ::T
+    γ₀::T
+    γ₁::T
+
+    # Model functions: parametric types (fast dispatch)
+    # production_fun::FP
+    # utility_fun::FU
+    # matching_fun::FM
+
+    # Market parameters
+    κ₀::T
+    κ₁::T
+    β::T
+    δ::T
+    b::T
+    ξ::T
+
+    # Grids — use Int for portability
+    # ψ_grid (remote productivity)
+    n_ψ::Int
+    ψ_min::T
+    ψ_max::T
+    ψ_grid::Vector{T}
+    ψ_pdf::Vector{T}
+    ψ_cdf::Vector{T}
+
+    # h_grid (skill)
+    aₕ::T
+    bₕ::T
+    n_h::Int
+    h_min::T
+    h_max::T
+    h_grid::Vector{T}
+    h_pdf::Vector{T}
+    h_cdf::Vector{T}
 end
+
+# Little helper so Duals and Reals both work
+_unwrap(x) = try
+    ForwardDiff.value(x)
+catch
+    x
+end
+
+function validate!(p::Primitives)
+    βv, δv = _unwrap(p.β), _unwrap(p.δ)
+    κ0v, κ1v = _unwrap(p.κ₀), _unwrap(p.κ₁)
+
+    0 ≤ βv ≤ 1 || throw(ArgumentError("β must be in [0,1], got $(βv)"))
+    0 ≤ δv ≤ 1 || throw(ArgumentError("δ must be in [0,1], got $(δv)"))
+    κ0v ≥ 0 && κ1v ≥ 0 || throw(ArgumentError("κ₀, κ₁ must be ≥ 0, got $(κ0v), $(κ1v)"))
+
+    # ψ-grid checks
+    length(p.ψ_grid) == p.n_ψ || throw(ArgumentError("length(ψ_grid) ≠ n_ψ"))
+    issorted(p.ψ_grid) || throw(ArgumentError("ψ_grid must be sorted"))
+    all(p.ψ_min .≤ p.ψ_grid .≤ p.ψ_max) || throw(ArgumentError("ψ_grid outside [ψ_min, ψ_max]"))
+    all(p.ψ_pdf .≥ zero(eltype(p.ψ_pdf))) || throw(ArgumentError("ψ_pdf must be nonnegative"))
+    isapprox(sum(p.ψ_pdf), one(eltype(p.ψ_pdf))) || throw(ArgumentError("ψ_pdf must sum to 1"))
+    issorted(p.ψ_cdf) && isapprox(last(p.ψ_cdf), one(eltype(p.ψ_cdf))) ||
+        throw(ArgumentError("ψ_cdf must be nondecreasing and end at 1"))
+
+    # h-grid checks
+    length(p.h_grid) == p.n_h || throw(ArgumentError("length(h_grid) ≠ n_h"))
+    issorted(p.h_grid) || throw(ArgumentError("h_grid must be sorted"))
+    all(p.h_min .≤ p.h_grid .≤ p.h_max) || throw(ArgumentError("h_grid outside [h_min, h_max]"))
+    all(p.h_pdf .≥ zero(eltype(p.h_pdf))) || throw(ArgumentError("h_pdf must be nonnegative"))
+    isapprox(sum(p.h_pdf), one(eltype(p.h_pdf))) || throw(ArgumentError("h_pdf must sum to 1"))
+    issorted(p.h_cdf) && isapprox(last(p.h_cdf), one(eltype(p.h_cdf))) ||
+        throw(ArgumentError("h_cdf must be nondecreasing and end at 1"))
+
+    return p
+end
+
+# Convenience wrapper: build with keywords from @with_kw, then validate.
+validated_Primitives(; kwargs...) = begin
+    p = Primitives(; kwargs...)  # generated by @with_kw
+    validate!(p)
+end
+
+
 """
     Results
 
@@ -99,67 +132,75 @@ Initializes a `Results` object using the model primitives. Sets up arrays with a
 - The remote work policy (`α_policy`) is transposed to match the expected dimensions.
 - Throws an `ArgumentError` if `prim.h_pdf` is not a `Vector{Float64}`.
 """
-mutable struct Results
+mutable struct Results{T<:Real}
     #== Core Value Functions ==#
-    S::Matrix{Float64}                  # Total match surplus S(h, ψ) -> Array of size (n_h, n_ψ)
-    U::Vector{Float64}                  # Unemployed worker value U(h) -> Array of size (n_h)
+    S::Matrix{T}                  # Total match surplus S(h, ψ) -> Array of size (n_h, n_ψ)
+    U::Vector{T}                  # Unemployed worker value U(h) -> Array of size (n_h)
 
     #== Aggregate Market Outcomes ==#
-    θ::Float64                          # Aggregate market tightness (scalar)
-    p::Float64                          # Job finding probability (scalar)
-    q::Float64                          # Vacancy filling probability (scalar)
+    θ::T                          # Aggregate market tightness (scalar)
+    p::T                          # Job finding probability (scalar)
+    q::T                          # Vacancy filling probability (scalar)
 
     #== Firm and Worker Distributions (Endogenous) ==#
-    v::Vector{Float64}                  # Vacancies posted by each firm type v(ψ) -> Array of size (n_ψ)
-    u::Vector{Float64}                  # Mass of unemployed workers of each type u(h) -> Array of size (n_h)
-    n::Matrix{Float64}                  # Mass of employed workers in each match n(h, ψ) -> Array of size (n_h, n_ψ)
+    v::Vector{T}                  # Vacancies posted by each firm type v(ψ) -> Array of size (n_ψ)
+    u::Vector{T}                  # Mass of unemployed workers of each type u(h) -> Array of size (n_h)
+    n::Matrix{T}                  # Mass of employed workers in each match n(h, ψ) -> Array of size (n_h, n_ψ)
 
     #== Policy Functions ==#
-    α_policy::Matrix{Float64}           # Optimal remote work α(h, ψ) -> Array of size (n_h, n_ψ)
-    w_policy::Matrix{Float64}           # Optimal wage w(h, ψ) -> Array of size (n_h, n_ψ)
+    α_policy::Matrix{T}           # Optimal remote work α(h, ψ) -> Array of size (n_h, n_ψ)
+    w_policy::Matrix{T}           # Optimal wage w(h, ψ) -> Array of size (n_h, n_ψ)
 
     #== Thresholds (as before) ==#
-    ψ_bottom::Vector{Float64}         # Threshold for hybrid work ψ_bottom(h)
-    ψ_top::Vector{Float64}            # Threshold for full-time remote work ψ_top(h)
+    ψ_bottom::Vector{T}         # Threshold for hybrid work ψ_bottom(h)
+    ψ_top::Vector{T}            # Threshold for full-time remote work ψ_top(h)
 
-    # Constructor
-    function Results(prim::Primitives)
-        n_h = prim.n_h
-        n_ψ = prim.n_ψ
+    # Constructor - Fixed type parameter issues
+    function Results{T}(prim::Primitives{T}) where {T<:Real}
+        n_h = copy(prim.n_h)
+        n_ψ = copy(prim.n_ψ)
 
         # Initialize with appropriate dimensions and default values
-        S_init = zeros(n_h, n_ψ)
-        U_init = zeros(n_h)
-        θ_init = 1.0 # A reasonable starting guess
-        p_init, q_init = 0.0, 0.0 # Will be calculated from θ
-        v_init = ones(n_ψ) ./ n_ψ # e.g., uniform distribution
-        
+        S_init = zeros(T, n_h, n_ψ)
+        U_init = zeros(T, n_h)
+        θ_init = one(T) # A reasonable starting guess
+        p_init, q_init = zero(T), zero(T) # Will be calculated from θ
+        v_init = ones(T, n_ψ) ./ T(n_ψ) # e.g., uniform distribution
+
         # Start with unemployment matching population distribution
-        # Ensure h_pdf is a Vector{Float64} as expected
-            if !(typeof(prim.h_pdf) <: Vector{Float64})
-                throw(ArgumentError("prim.h_pdf must be a Vector{Float64} for Results initialization"))
-            end
-            u_init = copy(prim.h_pdf)
+        # Ensure h_pdf is a Vector{T} as expected
+        if !(eltype(prim.h_pdf) == T)
+            throw(ArgumentError("prim.h_pdf must have element type $T for Results initialization"))
+        end
+        u_init = copy(prim.h_pdf)
 
-            n_init = zeros(n_h, n_ψ)
-            w_policy_init = zeros(n_h, n_ψ)
-    
-            # This part only depends on primitives.
-            # find_thresholds_and_optimal_remote_policy returns α_policy as (n_ψ, n_h)
-            ψ_bottom_calc, ψ_top_calc, α_policy_calc_psi_h = find_thresholds_and_optimal_remote_policy(prim)
-            # Transpose α_policy to be (n_h, n_ψ)
-            α_policy_init = permutedims(α_policy_calc_psi_h, (2,1))
+        n_init = zeros(T, n_h, n_ψ)  # Fixed: specify type T
+        w_policy_init = zeros(T, n_h, n_ψ)  # Fixed: specify type T
 
-            # IMPORTANT: Wage policy CANNOT be pre-calculated anymore.
-            # It depends on the endogenous U(h) and S(h, ψ), which are solved for.
-            # So we just initialize it to zeros.
+        # This part only depends on primitives.
+        # find_thresholds_and_optimal_remote_policy returns α_policy as (n_ψ, n_h)
+        ψ_bottom_calc, ψ_top_calc, α_policy_calc_psi_h = find_thresholds_and_optimal_remote_policy(prim)
+        # Transpose α_policy to be (n_h, n_ψ)
+        α_policy_init = permutedims(α_policy_calc_psi_h, (2,1))
 
-            new(S_init, U_init, θ_init, p_init, q_init, v_init, u_init, n_init,
-                α_policy_init, w_policy_init, ψ_bottom_calc, ψ_top_calc)
+        # IMPORTANT: Wage policy CANNOT be pre-calculated anymore.
+        # It depends on the endogenous U(h) and S(h, ψ), which are solved for.
+        # So we just initialize it to zeros.
+
+        new{T}(S_init, U_init, θ_init, p_init, q_init, v_init, u_init, n_init,
+               α_policy_init, w_policy_init, ψ_bottom_calc, ψ_top_calc)
     end
 end
+
+# Add a convenience constructor that infers the type
+function Results(prim::Primitives{T}) where {T<:Real}
+    return Results{T}(deepcopy(prim))
+end
+
+f64(x) = Float64(x)
+iint(x) = Int(x)
 """
-    create_primitives_from_yaml(yaml_file::String) :: Primitives
+    create_primitives_from_yaml(yaml_file::String) :: Primitives{Float64}
 
 Load model primitives and grids from a YAML configuration file.
 
@@ -184,125 +225,185 @@ This function reads a YAML configuration file to extract model parameters and gr
 - The ψ grid is constructed using a KDE fit to empirical data, while the h grid is based on a Beta distribution.
 - The function currently contains some commented-out or legacy code for an additional utility grid, which is not used in the returned object.
 """
-function create_primitives_from_yaml(yaml_file::String)::Primitives
-    #> Load configuration from YAML file
-    config = YAML.load_file(yaml_file, dicttype = OrderedDict)
+function create_primitives_from_yaml(yaml_file::String)
+    # Load configuration
+    config = YAML.load_file(yaml_file, dicttype=OrderedDict)
     model_parameters = config["ModelParameters"]
-    model_grids = config["ModelGrids"]
+    model_grids      = config["ModelGrids"]
 
-    # Extract all parameters directly from model_parameters (flat, not nested)
-    κ₀    = model_parameters["kappa0"]
-    κ₁    = model_parameters["kappa1"]
-    β     = model_parameters["beta"]
-    δ     = model_parameters["delta"]
-    b     = model_parameters["b"]
-    ξ     = model_parameters["xi"]
-    A₀    = model_parameters["A0"]
-    A₁    = model_parameters["A1"]
-    ψ₀    = model_parameters["psi_0"]
-    ϕ     = model_parameters["phi"]
-    ν     = model_parameters["nu"]
-    c₀    = model_parameters["c0"]
-    χ     = model_parameters["chi"]
-    γ₀    = model_parameters["gamma0"]
-    γ₁    = model_parameters["gamma1"]
-    aₕ   = model_parameters["a_h"]
-    bₕ   = model_parameters["b_h"]
-    n_ψ   = model_parameters["n_psi"]
-    ψ_min  = model_grids["psi_min"]
-    ψ_max  = model_grids["psi_max"]
-    ψ_data = model_grids["psi_data"]
-    ψ_column = model_grids["psi_column"]
-    ψ_weight = model_grids["psi_weight"]
-    # Create ψ_grid
+    # Scalars (coerce to Float64)
+    κ₀  = f64(model_parameters["kappa0"])
+    κ₁  = f64(model_parameters["kappa1"])
+    β   = f64(model_parameters["beta"])
+    δ   = f64(model_parameters["delta"])
+    b   = f64(model_parameters["b"])
+    ξ   = f64(model_parameters["xi"])
+
+    A₀  = f64(model_parameters["A0"])
+    A₁  = f64(model_parameters["A1"])
+    ψ₀  = f64(model_parameters["psi_0"])
+    ϕ   = f64(model_parameters["phi"])
+    ν   = f64(model_parameters["nu"])
+    c₀  = f64(model_parameters["c0"])
+    χ   = f64(model_parameters["chi"])
+    γ₀  = f64(model_parameters["gamma0"])
+    γ₁  = f64(model_parameters["gamma1"])
+
+    aₕ  = f64(model_parameters["a_h"])
+    bₕ  = f64(model_parameters["b_h"])
+
+    # ψ-grid inputs
+    n_ψ      = iint(model_grids["n_psi"])
+    ψ_min    = f64(model_grids["psi_min"])
+    ψ_max    = f64(model_grids["psi_max"])
+    ψ_data   = model_grids["psi_data"]          # expect a table-like or vector
+    ψ_column = model_grids["psi_column"]        # col name or index for ψ
+    ψ_weight = get(model_grids, "psi_weight", nothing)  # optional
+
+    # build ψ grid via KDE
     ψ_grid, ψ_pdf, ψ_cdf = fit_kde_psi(
-        ψ_data, ψ_column; weights_col=ψ_weight, num_grid_points=n_ψ, boundary=(ψ_min, ψ_max))
+        ψ_data, ψ_column;
+        weights_col = ψ_weight,
+        num_grid_points = n_ψ,
+        boundary = (ψ_min, ψ_max)
+    )
 
-    #* h_grid Skill grid
-    n_h = model_grids["n_h"]
-    h_min = model_grids["h_min"]
-    h_max = model_grids["h_max"]
-    # Now we fit a Beta distribution:
-    # Fit a Beta distribution to h on [h_min, h_max] with shape parameters a_h, b_h
-    h_values = collect(range(h_min, h_max, length=n_h))
-    # Map h_values to [0,1] for Beta
-    h_scaled = (h_values .- h_min) ./ (h_max - h_min)
+    # h-grid (Beta on [h_min, h_max])
+    n_h   = iint(model_grids["n_h"])
+    h_min = f64(model_grids["h_min"])
+    h_max = f64(model_grids["h_max"])
+
+    h_grid   = collect(range(h_min, h_max; length=n_h))
+    h_scaled = (h_grid .- h_min) ./ (h_max - h_min)        # map to [0,1]
     beta_dist = Beta(aₕ, bₕ)
-    # Compute unnormalized pdf on grid
     h_pdf_raw = pdf.(beta_dist, h_scaled)
-    # Normalize pdf to sum to 1 (discrete approximation)
-    h_pdf = h_pdf_raw ./ sum(h_pdf_raw)
-    h_cdf = cumsum(h_pdf)
-    
+    h_pdf     = h_pdf_raw ./ sum(h_pdf_raw)
+    h_cdf     = cumsum(h_pdf)
+    h_cdf /= h_cdf[end]                              # ensure exact 1.0
 
-    # Build simple  functions that can be evaluated
+    # Model functions (closures are type-stable because they capture concrete scalars)
     production_fun = (h, ψ, α) -> (A₀ + A₁*h) * ((1 - α) + α * (ψ₀ * h^ϕ * ψ^ν))
     utility_fun    = (w, α)    -> w - c₀ * (1 - α)^(χ + 1) / (χ + 1)
     matching_fun   = (V, U)    -> γ₀ * U^γ₁ * V^(1 - γ₁)
-    
 
-    #> Create Primitives object
-    return Primitives(
-        A₀, A₁, ψ₀, ϕ, ν, c₀, χ, γ₀, γ₁,
-        production_fun, utility_fun, matching_fun,
-        κ₀, κ₁, β, δ, b, ξ,
-        n_ψ, ψ_min, ψ_max, ψ_grid, ψ_pdf, ψ_cdf, 
-        aₕ, bₕ, n_h, h_min, h_max, h_values, h_pdf, h_cdf
+    p = Primitives(
+        A₀=A₀, A₁=A₁, ψ₀=ψ₀, ϕ=ϕ, ν=ν, c₀=c₀, χ=χ, γ₀=γ₀, γ₁=γ₁,
+        # production_fun=production_fun, utility_fun=utility_fun, matching_fun=matching_fun,
+        κ₀=κ₀, κ₁=κ₁, β=β, δ=δ, b=b, ξ=ξ,
+        n_ψ=n_ψ, ψ_min=ψ_min, ψ_max=ψ_max, ψ_grid=Vector{Float64}(ψ_grid),
+        ψ_pdf=Vector{Float64}(ψ_pdf), ψ_cdf=Vector{Float64}(ψ_cdf),
+        aₕ=aₕ, bₕ=bₕ, n_h=n_h, h_min=h_min, h_max=h_max,
+        h_grid=h_grid, h_pdf=h_pdf, h_cdf=h_cdf
+    )    
+
+    # Assemble and validate
+    return validated_Primitives(
+        A₀=A₀, A₁=A₁, ψ₀=ψ₀, ϕ=ϕ, ν=ν, c₀=c₀, χ=χ, γ₀=γ₀, γ₁=γ₁,
+        κ₀=κ₀, κ₁=κ₁, β=β, δ=δ, b=b, ξ=ξ,
+        n_ψ=n_ψ, ψ_min=ψ_min, ψ_max=ψ_max, ψ_grid=Vector{Float64}(ψ_grid),
+        ψ_pdf=Vector{Float64}(ψ_pdf), ψ_cdf=Vector{Float64}(ψ_cdf),
+        aₕ=aₕ, bₕ=bₕ, n_h=n_h, h_min=h_min, h_max=h_max,
+        h_grid=h_grid, h_pdf=h_pdf, h_cdf=h_cdf
     )
 end
+"""
+find_thresholds_and_optimal_remote_policy(prim::Primitives)
 
-function find_thresholds_and_optimal_remote_policy(prim::Primitives)
-    # 1. Unpack parameters
+Compute analytical thresholds and the optimal remote-work share policy α(ψ,h) on a discrete grid.
+
+Arguments
+- prim::Primitives
+    A container (typically a NamedTuple or struct) expected to unpack to the following fields:
+    - n_ψ::Int        : number of productivity/grid points in ψ_grid
+    - ψ_grid::Vector  : grid of worker-specific productivity parameter ψ
+    - n_h::Int        : number of home-office quality/grid points in h_grid
+    - h_grid::Vector  : grid of home-office quality h
+    - A₀, A₁::Real    : parameters defining A(h) = A₀ + A₁*h
+    - ψ₀::Real        : scale parameter in g(h,ψ)
+    - ϕ::Real         : exponent on h in g(h,ψ)
+    - ν::Real         : exponent on ψ in g(h,ψ)
+    - c₀::Real        : fixed cost parameter for remote work
+    - χ::Real         : curvature parameter governing the interior solution
+
+Returns
+A tuple (ψ_bottom, ψ_top, α_policy) where:
+- ψ_bottom::Vector{Float64} of length n_h
+    The lower threshold for ψ (per h) separating full in-person from the hybrid region.
+    If A(h) ≤ c₀ the value is set to Inf indicating no hybrid region (only binary choices).
+- ψ_top::Vector{Float64} of length n_h
+    The upper threshold for ψ (per h) separating the hybrid region from full-remote,
+    given analytically by ψ_top(h) = (1 / (ψ₀ * h^ϕ))^(1/ν).
+- α_policy::Array{Float64,2} of size (n_ψ, n_h)
+    The optimal share of remote work α ∈ [0,1] evaluated at each (ψ, h) grid point.
+    Rows index ψ_grid, columns index h_grid.
+
+Behavior / algorithmic details
+1. Define A(h) = A₀ + A₁*h and g(h,ψ) = ψ₀ * h^ϕ * ψ^ν.
+2. Compute ψ_top(h) analytically from g(h,ψ_top)=1 → ψ_top = (1/(ψ₀ h^ϕ))^(1/ν).
+3. For each h calculate ψ_bottom(h):
+    - If A(h) ≤ c₀ set ψ_bottom(h) = Inf (no hybrid region exists).
+    - Else ψ_bottom(h) = ψ_top(h) * (1 - c₀ / A(h))^(1/ν).
+4. Construct α_policy as follows for each grid point (ψ,h):
+    - If ψ_bottom(h) == Inf:
+        - α = 1.0 when ψ ≥ ψ_top(h) (full-remote), else α = 0.0 (full in-person).
+    - Else (hybrid region exists):
+        - If ψ ≤ ψ_bottom(h): α = 0.0 (full in-person).
+        - If ψ ≥ ψ_top(h): α = 1.0 (full-remote).
+        - If ψ ∈ (ψ_bottom(h), ψ_top(h)): interior/hybrid solution
+             α = 1 − max(0, term)^(1/χ), where term = (A(h) / c₀) * (1 − g(h,ψ)).
+                The max(0, ·) ensures numerical non-negativity before taking the (1/χ)-power.
+
+Notes and assumptions
+- The function assumes ψ_grid and h_grid align with n_ψ and n_h respectively.
+- The hybrid-interior formula is only meaningful when 0 < term ≤ 1 (construction ensures term ≥ 0 in the hybrid region).
+- ψ_bottom may be Inf to signal the degenerate binary regime (no interior/hybrid values).
+- Complexity is O(n_h * n_ψ) due to the nested evaluation over the grid.
+- The implementation guards against taking roots of negative numbers and handles the degenerate A(h) ≤ c₀ case explicitly.
+"""
+function find_thresholds_and_optimal_remote_policy(prim::Primitives{T}) where {T<:Real}
     @unpack n_ψ, ψ_grid, n_h, h_grid, A₀, A₁, ψ₀, ϕ, ν, c₀, χ = prim
 
-    # 2. Define helper functions
     A(h) = A₀ + A₁*h
     g(h, ψ) = ψ₀ * h^ϕ * ψ^ν
 
-    # 3. Calculate thresholds analytically
-    ψ_top = @. (1 / (ψ₀ * h_grid^ϕ))^(1/ν)
+    ψ_top = @. (one(T) / (ψ₀ * h_grid^ϕ))^(one(T)/ν)
     
-    ψ_bottom = zeros(n_h)
+    # Initialize the array with the generic type T
+    ψ_bottom = zeros(T, n_h)
     for (i, h) in enumerate(h_grid)
         Ah = A₀ + A₁*h
-        if Ah <= c₀
-            ψ_bottom[i] = Inf
+        # --- CHANGE 1: Use ForwardDiff.value for comparison ---
+        if ForwardDiff.value(Ah) <= ForwardDiff.value(c₀)
+            ψ_bottom[i] = T(Inf) # Ensure Inf is of the correct type
         else
-            ψ_bottom[i] = ψ_top[i] * (1 - c₀ / Ah)^(1/ν)
+            ψ_bottom[i] = ψ_top[i] * (one(T) - c₀ / Ah)^(one(T)/ν)
         end
     end
 
-    # 4. Initialize policy matrix
-    α_policy = zeros(n_ψ, n_h)
+    # Initialize the policy matrix with the generic type T
+    α_policy = zeros(T, n_ψ, n_h)
 
-    # 5. Compute the optimal α policy with CORRECTED logic
     for (i, h) in enumerate(h_grid)
         ψ_b = ψ_bottom[i]
         ψ_t = ψ_top[i]
 
         for (j, ψ) in enumerate(ψ_grid)
-            
-            # --- LOGIC CORRECTION IS HERE ---
-            if isinf(ψ_b)
-                # CASE 1: No hybrid region exists for this worker.
-                # The world is binary: either in-person or full-remote.
-                # The only threshold that matters is ψ_top.
-                if ψ >= ψ_t
-                    α_policy[j, i] = 1.0 # Full Remote
+            # --- CHANGE 2: Use ForwardDiff.value for all logic checks ---
+            if isinf(ForwardDiff.value(ψ_b))
+                if ForwardDiff.value(ψ) >= ForwardDiff.value(ψ_t)
+                    α_policy[j, i] = one(T)
                 else
-                    α_policy[j, i] = 0.0 # Full In-Person
+                    α_policy[j, i] = zero(T)
                 end
             else
-                # CASE 2: A hybrid region exists. Use the standard three-regime logic.
-                if ψ <= ψ_b
-                    α_policy[j, i] = 0.0 # Full In-Person
-                elseif ψ >= ψ_t
-                    α_policy[j, i] = 1.0 # Full Remote
+                if ForwardDiff.value(ψ) <= ForwardDiff.value(ψ_b)
+                    α_policy[j, i] = zero(T)
+                elseif ForwardDiff.value(ψ) >= ForwardDiff.value(ψ_t)
+                    α_policy[j, i] = one(T)
                 else
-                    # Hybrid Work. Calculate the interior solution.
-                    term = ( (A₀ + A₁*h) / c₀) * (1 - g(h, ψ))
-                    # The term must be non-negative in the hybrid region by construction
-                    α_policy[j, i] = 1.0 - max(0.0, term)^(1/χ)
+                    term = ( (A₀ + A₁*h) / c₀) * (one(T) - g(h, ψ))
+                    # max() is safe for Dual numbers, but this is also fine
+                    α_policy[j, i] = one(T) - max(zero(T), term)^(one(T)/χ)
                 end
             end
         end
@@ -324,7 +425,7 @@ Initializes the model using the provided YAML file.
 # Description
 This function creates the model primitives from the specified YAML file and initializes the results structure. It returns both the primitives and results for further use in the model workflow.
 """
-function initializeModel(yaml_file::String)::Tuple{Primitives, Results}
+function initializeModel(yaml_file::String)
     #> Create primitives from YAML file
     prim = create_primitives_from_yaml(yaml_file)
     #> Initialize results (just use contructor)

@@ -9,7 +9,7 @@ Description: Contains the core functions to solve for the steady-state equilibri
 #? Main Solver Function
 #==========================================================================================#
 using Parameters, Printf, Term
-using ForwardDiff 
+using ForwardDiff, Roots
 """
     solve_model(prim::Primitives, res::Results; 
                 tol::Float64=1e-7, max_iter::Int=5000, 
@@ -44,225 +44,127 @@ The function modifies the `res` object in-place, updating its fields with the
 equilibrium values for surplus, market tightness, job-finding rate, vacancy-filling rate,
 vacancies, unemployment, and other derived quantities.
 """
-# function solve_model(   
-#                         prim::Primitives,   # Model parameters and grids
-#                         res::Results;       # Initial results object to be updated
-#                         tol::Float64=1e-7,  # convergence tolerance for outer loop on θ
-#                         max_iter::Int=5000,  # maximum number of iterations for outer loop
-#                         verbose::Bool=true, # print convergence progress
-#                         λ_S::Float64 = 0.01, # damping factor for surplus S
-#                         λ_u::Float64 = 0.01  # damping factor for unemployment u
-#                     )
-
-
-#     #* Phase 0: Setup & pre-calculations
-#     @unpack h_grid, ψ_grid, β, δ, ξ, κ₀, κ₁, n_h, n_ψ, γ₀, γ₁ = prim
-#     f_h = prim.h_pdf
-#     f_ψ = prim.ψ_pdf
-#     Γ = f_ψ ./ sum(f_ψ)                                     # firm type distribution Γ(ψ)
-#     # static α* and flow surplus s(h,ψ)
-#     s_flow = calculate_flow_surplus(prim, res)
-#     # Initialize S and u
-#     S = copy(s_flow)                                       # S(h,ψ) = s(h,ψ)
-#     u = copy(f_h)                                          # u₀(h)=N(h)
-    
-#     denom = 1.0 - β * (1.0 - δ) # denominator in the Bellman equation for surplus S(h,ψ)
-    
-#     ΔS = Inf # Initialize change in surplus for convergence check
-#     Δu_prev = Inf
-#     ΔS_prev = Inf
-
-
-
-#     #* Phase 1: main fixed‐point on S and u
-#     for k in 1:max_iter
-#         S_old = copy(S)
-#         u_old = copy(u)
-        
-#         #? --- Step 1: Calculate market aggregates based on S_old and u_old ---
-#         L = sum(u)
-#         u_dist = u ./ L
-        
-#         #> (a) Firm's expected benefit B(ψ) per filled vacancy
-#         # B(ψ) = ∫(1-ξ)S(h,ψ)⁺ * (u(h)/L) dF_h(h)
-#         B = [ sum((1.0-ξ) * max.(0.0, S_old[:, j]) .* u_dist) for j in 1:n_ψ ]
-        
-#         #> (b) Market tightness θ
-#         # θ = [ (1/L) * ∫(B(ψ)/κ₀)^(1/κ₁) dF_ψ(ψ) ]^(κ₁/(κ₁+γ))
-#         Integral = sum((B ./ κ₀).^(1/κ₁) .* f_ψ) 
-#         θ = ((1/L) * Integral)^(κ₁ / (κ₁ + γ₁))
-        
-#         #> (c) Aggregate job finding (p) and vacancy filling (q) probabilities
-#         p = θ^(1 - γ₁)
-#         q = θ^(-γ₁)
-        
-#         #? --- Step 2: Calculate the ENDOGENOUS vacancy distribution Γ ---
-        
-#         #> (d) Vacancies per firm v(ψ) and aggregate vacancies V
-#         # v(ψ) = (q*B(ψ)/κ₀)^(1/κ₁)
-#         v = ( (q .* B) ./ κ₀ ).^(1/κ₁)
-#         # V = ∫v(ψ)dF_ψ(ψ)
-#         V = sum(v .* f_ψ) 
-
-#         #> (e) Distribution of vacancies met by workers, Γ(ψ)
-#         # Γ(ψ) = v(ψ)f_ψ(ψ) / V
-#         Γ_new = V > 0 ? (v .* f_ψ) ./ V : zeros(n_ψ)
-
-#         #? --- Step 3: Update S and u using the NEW endogenous Γ ---
-        
-#         #> (f) Update Surplus Matrix S
-#         ExpectedSearch = sum(max.(0.0, S_old) .* Γ_new', dims=2)
-#         S_update = @. (s_flow - (β * p * ξ * ExpectedSearch)) / denom 
-#         S .= (1.0 - λ_S) .* S_old .+ λ_S .* S_update
-#         #> (g) Update Unemployment Vector u
-#         # --- JACOBI-STYLE UPDATE ---
-#         # Calculate ProbAccept using S_old to be consistent with p and Γ_new
-#         ProbAccept = sum((S_old .> 0.0) .* Γ_new', dims=2) # <-- USE S_old HERE
-#         # ---------------------------
-#         unemp_rate = @. δ / (δ + p * ProbAccept)
-#         u_update = unemp_rate .* f_h 
-#         u .= (1.0 - λ_u) .* u_old .+ λ_u .* u_update
-
-#         #> (h) Check for convergence
-#         # ΔS = maximum(abs.(S .- S_old))
-#         ΔS = maximum(abs.(ForwardDiff.value.(S) - ForwardDiff.value.(S_old)))
-#         # Δu = maximum(abs.(u .- u_old))
-#         Δu = maximum(abs.(ForwardDiff.value.(u) - ForwardDiff.value.(u_old)))
-
-#         # Initialize baseline residuals on first iteration
-#         if k == 1
-#             ΔS0 = ΔS
-#             Δu0 = Δu
-#         end
-
-#         ΔS_prev = ΔS
-#         Δu_prev = Δu
-
-#         if verbose && k % 1 == 0
-#             println(@bold @cyan "Iteration $k: ΔS=$ΔS")
-#         end
-
-#         if ΔS < tol
-
-#             if verbose
-#                 println(@bold @green "Converged after $k iters (ΔS=$ΔS).")
-#             end
-#             break
-#         end
-#     end # for k in 1:max_iter
-
-
-#     if ΔS >= tol
-#         @warn "Model failed to converge after $max_iter iterations. Last change: ΔS=$ΔS"
-#     end
-
-#     #* Phase 2: Post‐processing – assemble Results
-    
-#     # --- ONE FINAL UPDATE FOR FULL CONSISTENCY ---
-#     # Recalculate all aggregate variables using the final converged S and u
-#     # to ensure perfect synchronization before calculating final policies.
-    
-#     # (a) Final L and B
-#     L_final = sum(u)
-#     u_dist_final = L_final > 0 ? u ./ L_final : zeros(n_h)
-#     B_final = [ sum((1.0-ξ) * max.(0.0, S[:, j]) .* u_dist_final) for j in 1:n_ψ ]
-    
-#     # (b) Final θ
-#     Integral_final = sum((B_final ./ κ₀).^(1/κ₁) .* f_ψ)
-#     θ_final = ((1/L_final) * Integral_final)^(κ₁ / (κ₁ + γ₁))
-    
-#     # (c) Final p and q
-#     p_final = θ_final^(1 - γ₁)
-#     q_final = θ_final^(-γ₁)
-
-#     # (d) Final v
-#     v_final = ( (q_final .* B_final) ./ κ₀ ).^(1/κ₁)
-#     # -----------------------------------------
-
-#     # Store the fully consistent, final values in the results object
-#     res.S .= S
-#     res.θ  = θ_final
-#     res.p  = p_final
-#     res.q  = q_final
-#     res.v .= v_final
-#     res.u .= u
-    
-#     # Calculate final wage, unemployment value, and employment distribution
-#     calculate_final_policies!(res, prim)
-            
-# end
-
 function solve_model(
-                        prim::Primitives,
-                        res::Results;
+                        prim::Primitives{T},
+                        res::Results{T};
                         tol::Float64=1e-7,
                         max_iter::Int=5000,
                         verbose::Bool=true,
-                        λ_S::Float64 = 0.01,
-                        λ_u::Float64 = 0.01
-                    )
+                        print_freq::Int=100,
+                        λ_S::Float64 = 0.1,
+                        λ_u::Float64 = 0.1
+                    ) where {T<:Real}
+
 
     @unpack h_grid, ψ_grid, β, δ, ξ, κ₀, κ₁, n_h, n_ψ, γ₀, γ₁ = prim
-    f_h = prim.h_pdf
-    f_ψ = prim.ψ_pdf
+
+    production_fun = (h, ψ, α) -> (prim.A₀ + prim.A₁*h) * ((1 - α) + α * (prim.ψ₀ * h^prim.ϕ * ψ^prim.ν))
+    utility_fun    = (w, α)    -> w - prim.c₀ * (1 - α)^(prim.χ + 1) / (prim.χ + 1)
+    matching_fun   = (V, U)    -> prim.γ₀ * U^prim.γ₁ * V^(1 - prim.γ₁)
+
+    f_h = copy(prim.h_pdf)
+    f_ψ = copy(prim.ψ_pdf)
     Γ = f_ψ ./ sum(f_ψ)
     s_flow = calculate_flow_surplus(prim, res)
 
-    # --- AD FIX: Initialize arrays with the parameter type ---
-    # Get the numeric type from a parameter that will be differentiated.
-    # If AD is running, T will be a Dual type. If not, it will be Float64.
-    T = eltype(prim.c₀)
-
     # Initialize S and u as arrays of type T.
-    S = T.(s_flow)
-    u = T.(f_h)
-    # --- END FIX ---
+    S = copy(s_flow)
+
+    u = copy(f_h)
 
     denom = 1.0 - β * (1.0 - δ)
     ΔS = Inf
-
+    θ = NaN
     for k in 1:max_iter
+        # Store state at the beginning of the iteration for convergence check
         S_old = copy(S)
         u_old = copy(u)
 
-        L = sum(u)
-        u_dist = u ./ L
+        # --- Part 1: Update S using the state from the previous iteration ---
+        # All aggregates here are calculated based on S_old and u_old
+        L = sum(u_old)
+        u_dist = u_old ./ L
 
-        # Use ForwardDiff.value for all comparisons and control flow
         B = [ sum((1.0-ξ) * max.(0.0, ForwardDiff.value.(S_old[:, j])) .* u_dist) for j in 1:n_ψ ]
         Integral = sum((B ./ κ₀).^(1/κ₁) .* f_ψ)
-        θ = ((1/L) * Integral)^(κ₁ / (κ₁ + γ₁))
-        p = θ^(1 - γ₁)
-        q = θ^(-γ₁)
+        # θ = ((1/L) * Integral)^(κ₁ / (κ₁ + γ₁))
+        # p = θ^(1 - γ₁)
+        # q = θ^(-γ₁)
+        try 
+            θ = solve_for_theta_bounded(L, Integral, κ₀, κ₁, γ₁) 
+        catch
+            print(L)
+            return
+        end
+        p = (1.0 + θ^(-γ₁))^(-1.0 / γ₁)
+        q = (1.0 + θ^γ₁)^(-1.0 / γ₁)
         v = ( (q .* B) ./ κ₀ ).^(1/κ₁)
         V = sum(v .* f_ψ)
-        Γ_new = ForwardDiff.value(V) > 0 ? (v .* f_ψ) ./ V : zeros(n_ψ)
+        Γ = V > 0 ? (v .* f_ψ) ./ V : zeros(T, n_ψ)
 
-        ExpectedSearch = sum(max.(0.0, ForwardDiff.value.(S_old)) .* Γ_new', dims=2)
+        ExpectedSearch = sum(max.(0.0, S_old) .* Γ', dims=2)
         S_update = @. (s_flow - (β * p * ξ * ExpectedSearch)) / denom
+        
+        # Apply the update to S. From this point on, S is the NEW value for iteration k.
         S .= (1.0 - λ_S) .* S_old .+ λ_S .* S_update
 
-        ProbAccept = sum((ForwardDiff.value.(S_old) .> 0.0) .* Γ_new', dims=2)
-        unemp_rate = @. δ / (δ + p * ProbAccept)
-        u_update = unemp_rate .* f_h
+        # --- Part 2: Update u using the NEW S from Part 1 ---
+        # Recalculate aggregates using the just-updated S to get a new p and Γ.
+        # This makes the unemployment update immediately responsive to the surplus update.
+        B_new = [ sum((1.0-ξ) * max.(0.0, ForwardDiff.value.(S[:, j])) .* u_dist) for j in 1:n_ψ ] # Uses NEW S
+        Integral_new = sum((B_new ./ κ₀).^(1/κ₁) .* f_ψ)
+        # θ_new = ((1/L) * Integral_new)^(κ₁ / (κ₁ + γ₁)) # L is still based on u_old
+        # p_new = θ_new^(1 - γ₁)
+        # q_new = θ_new^(-γ₁)
+        θ_new = solve_for_theta_bounded(L, Integral_new, κ₀, κ₁, γ₁) 
+        p_new = (1.0 + θ_new^(-γ₁))^(-1.0 / γ₁)
+        q_new = (1.0 + θ_new^γ₁)^(-1.0 / γ₁)
+        v_new = ( (q_new .* B_new) ./ κ₀ ).^(1/κ₁)
+        V_new = sum(v_new .* f_ψ)
+        Γ_new = V_new > 0 ? (v_new .* f_ψ) ./ V_new : zeros(T, n_ψ)
+
+        # Now, calculate the unemployment update using these fresh aggregates.
+        ProbAccept = sum((ForwardDiff.value.(S) .> 0.0) .* Γ_new', dims=2) # Uses NEW S and NEW Γ
+        unemp_rate = @. δ / (δ + p_new * ProbAccept)
+        
+        # Calculate the mass of employed workers consistent with the flows from the OLD unemployment distribution
+        n_new = similar(u_old)
+        for i_h in 1:n_h
+            # This is the inflow into employment for type h, based on the state at the start of the iteration
+            inflow = p_new * u_old[i_h] * ProbAccept[i_h] 
+            n_new[i_h] = inflow / δ
+        end
+
+        # The new unemployment mass is simply the residual of the total population
+        u_update = f_h .- n_new
+        # Ensure u_update is not negative due to numerical precision issues
+        u_update .= max.(0.0, u_update)
+
+        # Apply the damped update
         u .= (1.0 - λ_u) .* u_old .+ λ_u .* u_update
 
-        ΔS = maximum(abs.(ForwardDiff.value.(S) .- ForwardDiff.value.(S_old)))
+        # --- Part 3: Check for Convergence ---
+        ΔS = maximum(abs.(S .- S_old))
 
-        if ΔS < tol
+        if verbose && (k % print_freq == 0 || k == 1)
+            @printf("Iteration %4d: ΔS = %.6e, L = %.6f, θ = %.6f, p = %.6f, q = %.6f\n", 
+                    k, ForwardDiff.value(ΔS), L, θ, p, q)
+        end
+
+        if ForwardDiff.value(ΔS) < tol
             if verbose; println(@bold @green "Converged after $k iters (ΔS=$ΔS)."); end
             break
         end
     end
 
-    if ΔS >= tol
-        @warn "Model failed to converge after $max_iter iterations. Last change: ΔS=$ΔS"
-    end
-
+    # if ForwardDiff.value(ΔS) >= tol
+    #     @warn "Model failed to converge after $max_iter iterations. Last change: ΔS=$ΔS"
+    # end
+    
     # Post-processing
     L_final = sum(u)
-    u_dist_final = L_final > 0 ? u ./ L_final : zeros(n_h)
-    B_final = [ sum((1.0-ξ) * max.(0.0, ForwardDiff.value.(S[:, j])) .* u_dist_final) for j in 1:n_ψ ]
+    u_dist_final = L_final > 0 ? u ./ L_final : zeros(T, n_h)
+    B_final = [ sum((1.0-ξ) * max.(0.0, S[:, j]) .* u_dist_final) for j in 1:n_ψ ]
     Integral_final = sum((B_final ./ κ₀).^(1/κ₁) .* f_ψ)
     θ_final = ((1/L_final) * Integral_final)^(κ₁ / (κ₁ + γ₁))
     p_final = θ_final^(1 - γ₁)
@@ -281,9 +183,8 @@ end
 #==========================================================================================
 #? Core Inner Loop and Update Functions
 ==========================================================================================#
-
 """
-    solve_inner_loop(res::Results, prim::Primitives, s_flow::Matrix{Float64}; tol::Float64=1e-8, max_iter::Int=2000, verbose::Bool=true)
+    solve_inner_loop(res::Results, prim::Primitives, s_flow::AbstractMatrix{T}; tol::Float64=1e-8, max_iter::Int=2000, verbose::Bool=true)
 
 Solves for the partial equilibrium objects (`S`, `v`, `u`) for a *fixed* set of
 aggregate probabilities `p` and `q`.
@@ -296,7 +197,7 @@ Gauss-Seidel-like iterative method.
 # Arguments
 - `res::Results`: The results object to be updated in-place.
 - `prim::Primitives`: The model primitives.
-- `s_flow::Matrix{Float64}`: The pre-calculated flow surplus matrix `s(h, ψ)`.
+- `s_flow::AbstractMatrix{T}`: The pre-calculated flow surplus matrix `s(h, ψ)`.
 - `tol::Float64`: Convergence tolerance for the surplus matrix `S`.
 - `max_iter::Int`: Maximum number of iterations for this inner loop.
 - `verbose::Bool`: If true, prints convergence progress for the inner loop.
@@ -304,8 +205,8 @@ Gauss-Seidel-like iterative method.
 # Returns
 - `nothing`: The `res` object is modified in-place.
 """
-function solve_inner_loop(res::Results, prim::Primitives, s_flow::Matrix{Float64}; tol::Float64=1e-8, max_iter::Int=2000, verbose::Bool=true)
-    
+function solve_inner_loop(res::Results{T}, prim::Primitives{T}, s_flow::AbstractMatrix{T}; tol::Float64=1e-8, max_iter::Int=2000, verbose::Bool=true) where {T<:Real}
+
     # Loop until the surplus matrix S converges or max_iter is reached.
     for i in 1:max_iter
         # 1. Store the old surplus matrix to check for convergence later.
@@ -327,7 +228,7 @@ function solve_inner_loop(res::Results, prim::Primitives, s_flow::Matrix{Float64
             @printf("    Inner Iter: %4d | Surplus Diff: %.4e\n", i, diff)
         end
 
-        if diff < tol
+        if ForwardDiff.value(diff) < tol
             if verbose
                 @printf("    Inner loop converged after %d iterations.\n", i)
             end
@@ -341,7 +242,7 @@ function solve_inner_loop(res::Results, prim::Primitives, s_flow::Matrix{Float64
 end
 
 """
-    update_surplus!(res::Results, prim::Primitives, s_flow::Matrix{Float64})
+    update_surplus!(res::Results, prim::Primitives, s_flow::AbstractMatrix{T})
 
     Updates the total match surplus matrix `S(h, ψ)` in-place based on the Bellman equation.
 
@@ -355,12 +256,12 @@ end
     # Arguments
     - `res::Results`: The results object. `res.S` and `res.v` are read, and `res.S` is updated.
     - `prim::Primitives`: The model primitives, including `β`, `δ`, and `ξ`.
-    - `s_flow::Matrix{Float64}`: The pre-calculated flow surplus matrix.
+    - `s_flow::AbstractMatrix{T}`: The pre-calculated flow surplus matrix.
 
     # Returns
     - `nothing`: The `res.S` matrix is modified in-place.
 """
-function update_surplus!(res::Results, prim::Primitives, s_flow::Matrix{Float64})
+function update_surplus!(res::Results{T}, prim::Primitives{T}, s_flow::AbstractMatrix{T}) where {T<:Real}
     # Unpack parameters and grid sizes for readability
     @unpack β, δ, ξ, n_h, n_ψ = prim
     @unpack p = res # p is the aggregate job finding rate, fixed for this inner loop
@@ -371,7 +272,7 @@ function update_surplus!(res::Results, prim::Primitives, s_flow::Matrix{Float64}
     # Calculate the total number of vacancies V and the probability distribution
     # of meeting a firm of type ψ, denoted Γ(ψ).
     V = sum(res.v)
-    Gamma = (V > 0.0) ? res.v ./ V : zeros(n_ψ)
+    Gamma = (ForwardDiff.value(V) > 0.0) ? res.v ./ V : zeros(T, n_ψ)
 
     # We need a new matrix to store the results to avoid using partially
     # updated values from the current iteration within the same loop.
@@ -426,7 +327,7 @@ we assume a simple convex cost `c(v) = κ₀*v + 0.5*κ₁*v²`, which gives a m
 # Returns
 - `nothing`: The `res.v` vector is modified in-place.
 """
-function update_vacancies!(res::Results, prim::Primitives)
+function update_vacancies!(res::Results{T}, prim::Primitives{T}) where {T<:Real}
     # Unpack parameters and results for readability
     # Assuming κ₀ and κ₁ are in prim for a convex cost structure.
     # If only linear cost κ is used, this logic needs a small adjustment.
@@ -436,7 +337,7 @@ function update_vacancies!(res::Results, prim::Primitives)
     # Calculate the total mass of unemployed workers L and the probability
     # distribution of meeting a worker of type h, u_dist(h).
     L = sum(u)
-    u_dist = (L > 0.0) ? u ./ L : zeros(n_h)
+    u_dist = (ForwardDiff.value(L) > 0.0) ? u ./ L : zeros(T, n_h)
 
     # Loop over each firm type ψ
     for i_ψ in 1:n_ψ
@@ -459,8 +360,8 @@ function update_vacancies!(res::Results, prim::Primitives)
         # The number of vacancies cannot be negative.
         
         # Check if the firm can cover the fixed part of the marginal cost
-        if marginal_benefit > κ₀
-            num_vacancies = (marginal_benefit - κ₀) / κ₁
+        if ForwardDiff.value(marginal_benefit) > ForwardDiff.value(κ₀)
+            num_vacancies = (marginal_benefit -κ₀) / κ₁
         else
             num_vacancies = 0.0
         end
@@ -491,7 +392,7 @@ in a positive-surplus match, and it depends on the current vacancy distribution 
 # Returns
 - `nothing`: The `res.u` vector is modified in-place.
 """
-function update_unemployment!(res::Results, prim::Primitives)
+function update_unemployment!(res::Results{T}, prim::Primitives{T}) where {T<:Real}
     # Unpack parameters and results for readability
     @unpack δ, n_h, n_ψ, h_pdf = prim
     @unpack p, S, v = res
@@ -500,7 +401,7 @@ function update_unemployment!(res::Results, prim::Primitives)
     # Calculate the total number of vacancies V and the probability distribution
     # of meeting a firm of type ψ, Γ(ψ).
     V = sum(v)
-    Gamma = (V > 0.0) ? v ./ V : zeros(n_ψ)
+    Gamma = (ForwardDiff.value(V) > 0.0) ? v ./ V : zeros(T, n_ψ)
 
     # Loop over each worker type h
     for i_h in 1:n_h
@@ -508,7 +409,7 @@ function update_unemployment!(res::Results, prim::Primitives)
         S_h = @view S[i_h, :]
 
         # Create an indicator for whether a match has positive surplus
-        is_match_acceptable = S_h .> 0.0
+        is_match_acceptable = ForwardDiff.value.(S_h) .> 0.0
 
         # Calculate the probability that a meeting results in an acceptable job offer.
         # This is the integral/sum: ProbAccept(h) = ∫ 1_{S(h,ψ)>0} dΓ(ψ)
@@ -531,7 +432,7 @@ end
 #? Helper and Post-Processing Functions
 #==========================================================================================#
 """
-    calculate_flow_surplus(prim::Primitives, res::Results) -> Matrix{Float64}
+    calculate_flow_surplus(prim::Primitives, res::Results) -> AbstractMatrix{T}
 
 Pre-calculates the flow surplus `s(h, ψ)` for all `(h, ψ)` pairs.
 
@@ -552,16 +453,15 @@ computed once at the beginning of the solution process.
 - `res::Results`: The results object containing the `α_policy`.
 
 # Returns
-- `Matrix{Float64}`: A matrix of size `(n_h, n_ψ)` containing the flow surplus values.
+- `AbstractMatrix{T}`: A matrix of size `(n_h, n_ψ)` containing the flow surplus values.
 """
-function calculate_flow_surplus(prim::Primitives, res::Results)::Matrix{Float64}
-    # Unpack grid sizes for clarity
-    @unpack n_h, n_ψ, h_grid, ψ_grid, utility_fun, production_fun = prim
+function calculate_flow_surplus(prim::Primitives{T}, res::Results{T}) where {T<:Real}
+    @unpack n_h, n_ψ, h_grid, ψ_grid, b = prim
+    production_fun = (h, ψ, α) -> (prim.A₀ + prim.A₁*h) * ((1 - α) + α * (prim.ψ₀ * h^prim.ϕ * ψ^prim.ν))
+    utility_fun    = (w, α)    -> w - prim.c₀ * (1 - α)^(prim.χ + 1) / (prim.χ + 1)
 
-    # 1. Initialize an empty matrix `s_flow` of size (n_h, n_ψ).
-    #    Note: The convention used here is that the first dimension is for worker
-    #    type `h` and the second is for firm type `ψ`.
-    s_flow = Matrix{Float64}(undef, n_h, n_ψ)
+    # Create a concrete matrix, not an abstract one
+    s_flow = Matrix{T}(undef, n_h, n_ψ)
 
     # 2. Loop over all `(i_h, i_ψ)` pairs on the grid.
     for (i_h, h) in enumerate(h_grid)
@@ -587,7 +487,7 @@ function calculate_flow_surplus(prim::Primitives, res::Results)::Matrix{Float64}
 
             # f. The flow surplus is the joint value minus the worker's outside option,
             #    the unemployment benefit `b * h`. (Assuming b(h) = prim.b * h) #! Hardcoded for now
-            s = joint_flow_value - prim.b * h
+            s = joint_flow_value - b * h
 
             # g. Store the calculated flow surplus in the matrix.
             s_flow[i_h, i_ψ] = s
@@ -616,10 +516,12 @@ the final equilibrium values of `S`, `u`, `v`, and `p` to compute:
 # Returns
 - `nothing`: The `res` object is modified in-place with the final policies (`U`, `w_policy`, `n`).
 """
-function calculate_final_policies!(res::Results, prim::Primitives)
+function calculate_final_policies!(res::Results{T}, prim::Primitives{T}) where {T<:Real}
     # Unpack parameters and converged results
-    @unpack β, δ, ξ, b, n_h, n_ψ, h_grid, utility_fun = prim
+    @unpack β, δ, ξ, b, n_h, n_ψ, h_grid = prim
     @unpack p, S, v, u, α_policy = res
+
+    utility_fun    = (w, α)    -> w - prim.c₀ * (1 - α)^(prim.χ + 1) / (prim.χ + 1)
 
     f_ψ = prim.ψ_pdf
 
@@ -627,7 +529,7 @@ function calculate_final_policies!(res::Results, prim::Primitives)
     # ---------------------------------------------------------
     # First, calculate the expected search value for each worker type, which we need for U(h).
     V = sum(v .* f_ψ)
-    Gamma = (V > 0.0) ?  (v .* f_ψ) ./ V : zeros(n_ψ)
+    Gamma = (ForwardDiff.value(V) > 0.0) ?  (v .* f_ψ) ./ V : zeros(T, n_ψ)
 
     for i_h in 1:n_h
         S_h_positive = max.(0.0, @view S[i_h, :])
@@ -637,7 +539,7 @@ function calculate_final_policies!(res::Results, prim::Primitives)
         # U(h) = b(h) + β * [ (1-p)U(h) + p * (U(h) + ξ*E[S(h,ψ')⁺]) ]
         # Solving for U(h) gives:
         # U(h) = (b(h) + β * p * ξ * E[S(h,ψ')⁺]) / (1 - β)
-        numerator_U = b + β * p * ξ * expected_search_value # Assuming b(h) is constant prim.b
+        numerator_U = @. b * h_grid[i_h] + β * p * ξ * expected_search_value # Assuming b(h) is constant prim.b
         denominator_U = 1.0 - β
         res.U[i_h] = numerator_U / denominator_U
     end
@@ -657,7 +559,7 @@ function calculate_final_policies!(res::Results, prim::Primitives)
             
             # Invert the utility function to find the wage that delivers this utility
             # This uses the `find_implied_wage` function defined in `model_functions.jl`.
-            # This function solves `u(w, α) = required_flow_utility` for `w`. 
+            # This function solves `u(w, α) = required_flow_utility` for `w`.
             # For quasi linear utility this is u(w, α) = w - c(α) =  required_flow_utility => w = required_flow_utility  + c(α) 
             # Notice that -u(0, α) = c(α) => c(α) = required_flow_utility - u(0, α)
             res.w_policy[i_h, i_ψ] = required_flow_utility - utility_fun(0.0, α_star)
@@ -669,7 +571,7 @@ function calculate_final_policies!(res::Results, prim::Primitives)
     # From the steady-state flow condition: δ * n(h, ψ) = p * u(h) * Γ(ψ) * 1_{S>0}
     for i_h in 1:n_h
         for i_ψ in 1:n_ψ
-            if S[i_h, i_ψ] > 0.0
+            if ForwardDiff.value(S[i_h, i_ψ]) > 0.0
                 # Flow from unemployment into this specific job match
                 inflow = p * u[i_h] * Gamma[i_ψ]
                 # The stock of employed workers is the inflow rate divided by the outflow rate (δ)
@@ -680,4 +582,57 @@ function calculate_final_policies!(res::Results, prim::Primitives)
             end
         end
     end
+end
+
+"""
+    solve_for_theta_bounded(L, Integral_B, κ₀, κ₁, ρ)
+
+Numerically solves for the equilibrium market tightness θ using a bounded 
+matching function.
+
+This function finds the root of the implicit equilibrium equation:
+θ * (1 + θ^ρ)^(1 / (ρ*κ₁)) - C = 0
+where C is the constant right-hand side of the equation.
+
+# Arguments
+- `L::Float64`: The current aggregate search effort (unemployment).
+- `Integral_B::Float64`: The pre-calculated integral part of the equation: ∫[B(ψ)]^(1/κ₁) dFψ(ψ).
+- `κ₀::Float64`: Vacancy cost parameter.
+- `κ₁::Float64`: Vacancy cost curvature parameter.
+- `ρ::Float64`: Parameter for the bounded matching function.
+
+# Returns
+- `Float64`: The equilibrium market tightness, θ.
+"""
+function solve_for_theta_bounded(L::Float64, Integral_B::Float64, κ₀::Float64, κ₁::Float64, ρ::Float64)
+    # Case 1: No economic benefit for firms to post vacancies.
+    # If Integral_B is non-positive, firms won't post jobs, so V=0 and θ must be 0.
+    # We use a small tolerance to handle potential floating-point inaccuracies.
+    if Integral_B <= 1e-10
+        return 0.0
+    end
+
+    # Case 2: No searchers in the market.
+    # If L is effectively zero, market tightness is ill-defined or infinite.
+    # Returning a very large number is a reasonable cap. We handle this below.
+    # We also check here to avoid division by zero if L is exactly 0.
+    if L <= 1e-10        # This implies an extremely tight market. We return a large, capped value.
+        return 1e8 
+    end
+    # Calculate the constant right-hand side (RHS) of the equilibrium equation.
+    # This term does not depend on θ, so we compute it once.
+    C = (1.0 / (L * κ₀^(1.0 / κ₁))) * Integral_B
+
+    # Define the function whose root we want to find.
+    # We are solving for f(θ) = 0.
+    # f(θ) = LHS - RHS
+    f(θ) = θ * (1.0 + θ^ρ)^(1.0 / (ρ * κ₁)) - C
+
+    # Use a robust root-finding algorithm to solve for θ.
+    # We provide a search interval [low, high]. Since θ must be positive,
+    # we start the search just above zero.
+    # The function f(θ) is monotonic for θ > 0, so a root is guaranteed if C > 0.
+    θ_solution = find_zero(f, (1e-9, 1e6)) # Search in a wide positive interval
+
+    return θ_solution
 end

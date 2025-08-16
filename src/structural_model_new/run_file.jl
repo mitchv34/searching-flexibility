@@ -1,189 +1,345 @@
-using BenchmarkTools
+using Pkg
+# activate project containing Project.toml (adjust path if needed)
+Pkg.activate(joinpath(@__DIR__, ".."))
+Pkg.instantiate()
+
+using Distributed
+addprocs(9)  # add local workers after activating environment
+
+const ROOT = @__DIR__
+@everywhere begin
+    using Random, Statistics, SharedArrays, ForwardDiff
+    using Optimization, OptimizationOptimJL, Optim
+    include(joinpath($ROOT, "ModelSetup.jl"))
+    include(joinpath($ROOT, "ModelSolver.jl"))
+    include(joinpath($ROOT, "ModelEstimation.jl"))
+end
 using Random, Statistics
 using Term
 using Printf
 using CairoMakie
+using PrettyTables
 
-include("ModelSetup.jl")
-include("ModelSolver.jl")
-include("ModelEstimation.jl")
+include(joinpath(ROOT, "ModelPlotting.jl"))
 
 # --- REPL runner ---
 # Point to the configuration file
 config = "src/structural_model_new/model_parameters.yaml"
 # Initialize the model
-prim, res = initializeModel(config)
+prim, res = initializeModel(config);
+@show prim.c₀
+new_prim, new_res = update_primitives_results(prim, res, Dict(:c₀ => prim.c₀ * 2));
+@show new_prim.c₀
+
 # Solve the model
-solve_model(prim, res, verbose=true)
+@time solve_model(prim, res, verbose=false, λ_S = 0.01, λ_u = 0.01, tol = 1e-12, max_iter = 25000)
+@time solve_model(new_prim, new_res, verbose=false, λ_S = 0.01, λ_u = 0.01, tol = 1e-12, max_iter = 25000)
 
-# Solution diagnostics
-include("ModelPlotting.jl")
-# --- Generate diagnostic plots (integration with ModelPlotting) ---
-# Employment distribution heatmap
-fig_emp = ModelPlotting.plot_employment_distribution(res, prim)
-# Employment distribution with marginals
-fig_emp_marg = ModelPlotting.plot_employment_distribution_with_marginals(res, prim)
+# Create moments 
+baseline_moments = compute_model_moments(prim, res);
+new_moments = compute_model_moments(new_prim, new_res);
 
-fig_surplus = ModelPlotting.plot_surplus_function(res, prim)
+begin
+# Compare baseline vs new moments with PrettyTables
+# Works for Dict, NamedTuple, or simple structs
+moment_keys(m) = m isa AbstractDict ? collect(keys(m)) :
+                 m isa NamedTuple    ? collect(propertynames(m)) :
+                                        collect(fieldnames(typeof(m)))
 
-fig_alpha = ModelPlotting.plot_alpha_policy(res, prim)
+moment_get(m, k::Symbol) = m isa AbstractDict ? get(m, k, missing) :
+                           m isa NamedTuple    ? (k in propertynames(m) ? getproperty(m, k) : missing) :
+                                                 (k in fieldnames(typeof(m)) ? getfield(m, k) : missing)
 
-fig_wage_pol = ModelPlotting.plot_wage_policy(res, prim)
+all_keys = unique(Symbol.(vcat(moment_keys(baseline_moments), moment_keys(new_moments))))
+sort!(all_keys, by=string)
 
-fig_wage_amenity = ModelPlotting.plot_wage_amenity_tradeoff(res, prim)
+rows = Matrix{Any}(undef, length(all_keys), 4)
+for (i, k) in enumerate(all_keys)
+    b = moment_get(baseline_moments, k)
+    n = moment_get(new_moments, k)
+    d = (b isa Number && n isa Number) ? n - b : missing
+    rows[i, 1] = String(k)
+    rows[i, 2] = b
+    rows[i, 3] = n
+    rows[i, 4] = d
+end
 
-fig_outcome_skill = ModelPlotting.plot_outcomes_by_skill(res, prim)
-
-fig_work_arrangement = ModelPlotting.plot_work_arrangement_regimes(res, prim)
-
-fig_work_arrangement_viable = ModelPlotting.plot_work_arrangement_regimes(res, prim, gray_nonviable=true)
-
-fig_alpha_by_firm = ModelPlotting.plot_alpha_policy_by_firm_type(res, prim)
-
-
-# Compute and save baseline moments
-moments_baseline = compute_model_moments(prim, res);
-save_moments_to_yaml(moments_baseline, "baseline_moments.yaml")
-
-# Test 1: Basic moment computation
-println("Test 1 - Moment computation: ", isa(moments_baseline, NamedTuple) ? "PASS" : "FAIL")
-
-# Test 2: YAML save/load roundtrip
-moments_loaded = load_moments_from_yaml("baseline_moments.yaml")
-println("Test 2 - YAML roundtrip: ", moments_loaded.mean_logwage ≈ moments_baseline.mean_logwage ? "PASS" : "FAIL")
-
-# Test 3: Parameter perturbation
-perturbed = perturb_parameters(prim; scale=0.1)
-println("Test 3 - Parameter perturbation: ", length(perturbed) == 7 ? "PASS" : "FAIL")
-
-# Test 4: Estimation objective evaluation
-obj_val = estimation_objective(prim, res; data_moments=moments_baseline, A₁=prim.A₁*1.1)
-println("Test 4 - Objective evaluation: ", obj_val >= 0.0 ? "PASS" : "FAIL")
-
-# Test 5: Full parameter recovery test with detailed comparison
-println("\n" * "="^60)
-println("PARAMETER RECOVERY TEST WITH DETAILED COMPARISON")
-println("="^60)
-
-# Store original parameter values
-original_params = Dict(
-    :A₁ => prim.A₁, :ψ₀ => prim.ψ₀, :ν => prim.ν,
-    :a_h => prim.a_h, :b_h => prim.b_h,
-    :χ => prim.χ, :c₀ => prim.c₀
+pretty_table(
+    rows;
+    header = ["Moment", "Baseline", "New", "New - Baseline"],
+    title = "Model moments comparison"
 )
+end
 
-# Store original moments
-original_moments = moments_baseline
 
-# Test: Objective is ~0 at original parameters
-obj_at_original = estimation_objective(prim, res; data_moments=original_moments)
-println("Test 4a - Objective at original params: ", isapprox(obj_at_original, 0.0; atol=1e-10) ? "PASS" : @sprintf("FAIL (%.6e)", obj_at_original))
+begin
+# Define parameter grids
+chi_grid = collect(range(1.01, 3.0; length=100))
+c0_grid = collect(range(0.01, 0.5; length=100))
 
-# Explore objective curvature around baseline for 4 key parameters and plot (2x2)
-printstyled("\n" * repeat("-", 80) * "\n"; color=:cyan, bold=true)
-printstyled("Objective profiles around baseline parameters\n"; color=:cyan, bold=true)
+# Worker function for χ sweep
+@everywhere function sweep_chi(grid, prim_base, res_base)
+    moments_list = Vector{Any}(undef, length(grid))
+    for i in eachindex(grid)
+        chi = grid[i]
+        prim_i, res_i = update_primitives_results(prim_base, res_base, Dict(:χ => chi))
+        solve_model(prim_i, res_i, verbose=false, λ_S = 0.01, λ_u = 0.01)
+        moments_list[i] = compute_model_moments(prim_i, res_i)
+    end
+    return moments_list
+end
 
-param_syms = [:A₁, :ψ₀, :ν, :χ]
-rel_grid = collect(range(0.8, 1.2, length=25))  # ±20% around baseline
-obj_profiles = Dict{Symbol, Tuple{Vector{Float64}, Vector{Float64}}}()
+# Worker function for c₀ sweep
+@everywhere function sweep_c0(grid, prim_base, res_base)
+    moments_list = Vector{Any}(undef, length(grid))
+    for i in eachindex(grid)
+        c0 = grid[i]
+        prim_i, res_i = update_primitives_results(prim_base, res_base, Dict(:c₀ => c0))
+        solve_model(prim_i, res_i, verbose=false, λ_S = 0.01, λ_u = 0.01)
+        moments_list[i] = compute_model_moments(prim_i, res_i)
+    end
+    return moments_list
+end
 
-for s in param_syms
-    base = getfield(prim, s)
-    xvals = max.(1e-8, base .* rel_grid)
-    n = length(xvals)
-    yvals = Vector{Float64}(undef, n)
+println("Starting distributed parameter sweeps...")
 
-    printstyled(@sprintf("Evaluating objective on grid for %-3s (base=%.6g) ... ", String(s), base);
-                color=:light_blue, bold=false)
+# Run sweeps on different workers in parallel
+future_chi = remotecall(sweep_chi, 2, chi_grid, prim, res)  # Worker 2
+future_c0 = remotecall(sweep_c0, 3, c0_grid, prim, res)    # Worker 3
 
-    Threads.@threads for i in 1:n
-        xv = xvals[i]
-        # use thread-local copies to avoid race conditions
-        prim_local = deepcopy(prim)
-        res_local = deepcopy(res)
-        setfield!(prim_local, s, xv)
-        # evaluate objective on the thread-local model
-        obj = estimation_objective(prim_local, res_local; data_moments=original_moments)
-        yvals[i] = obj
+# Fetch results
+println("Computing χ sweep on worker 2...")
+chi_moments_list = fetch(future_chi)
+println("Computing c₀ sweep on worker 3...")
+c0_moments_list = fetch(future_c0)
+
+# Extract numeric moment keys from both sweeps
+function get_numeric_keys(moments_list)
+    all_keys = Symbol[]
+    for m in moments_list
+        append!(all_keys, moment_keys(m))
+    end
+    all_keys = unique(all_keys)
+    sort!(all_keys, by=string)
+    
+    numeric_keys = Symbol[]
+    for k in all_keys
+        if any(i -> moment_get(moments_list[i], k) isa Number, eachindex(moments_list))
+            push!(numeric_keys, k)
+        end
+    end
+    return numeric_keys
+end
+
+chi_numeric_keys = get_numeric_keys(chi_moments_list)
+c0_numeric_keys = get_numeric_keys(c0_moments_list)
+
+# Plot χ sweep results
+println("Plotting χ sweep results...")
+nplots_chi = length(chi_numeric_keys)
+ncol = 6
+nrow_chi = max(1, cld(nplots_chi, ncol))
+fig_chi = Figure(size=(2000, 400 * nrow_chi))
+
+for (idx, k) in enumerate(chi_numeric_keys)
+    row = ((idx - 1) ÷ ncol) + 1
+    col = ((idx - 1) % ncol) + 1
+    ax = Axis(fig_chi[row, col], title=String(k), xlabel="χ", ylabel="moment")
+
+    ys = Vector{Float64}(undef, length(chi_grid))
+    @inbounds for i in eachindex(chi_grid)
+        v = moment_get(chi_moments_list[i], k)
+        ys[i] = v isa Number ? float(v) : NaN
     end
 
-    obj_profiles[s] = (xvals, yvals)
-    min_obj, argmin_idx = findmin(yvals)
-    printstyled(@sprintf("done. min obj=%.6e at %.6g\n", min_obj, xvals[argmin_idx]);
-                color=:green, bold=false)
+    lines!(ax, chi_grid, ys, color=:steelblue)
+    vlines!(ax, [prim.χ], color=:red, linestyle=:dash, linewidth=2)
+end
+fig_chi[nrow_chi + 1, 1:ncol] = Label(fig_chi, "Model moments vs χ (distributed)", fontsize=18)
+display(fig_chi)
+
+# Plot c₀ sweep results
+println("Plotting c₀ sweep results...")
+nplots_c0 = length(c0_numeric_keys)
+nrow_c0 = max(1, cld(nplots_c0, ncol))
+fig_c0 = Figure(size=(2000, 400 * nrow_c0))
+
+for (idx, k) in enumerate(c0_numeric_keys)
+    row = ((idx - 1) ÷ ncol) + 1
+    col = ((idx - 1) % ncol) + 1
+    ax = Axis(fig_c0[row, col], title=String(k), xlabel="c₀", ylabel="moment")
+
+    ys = Vector{Float64}(undef, length(c0_grid))
+    @inbounds for i in eachindex(c0_grid)
+        v = moment_get(c0_moments_list[i], k)
+        ys[i] = v isa Number ? float(v) : NaN
+    end
+
+    lines!(ax, c0_grid, ys, color=:darkgreen)
+    vlines!(ax, [prim.c₀], color=:red, linestyle=:dash, linewidth=2)
+end
+fig_c0[nrow_c0 + 1, 1:ncol] = Label(fig_c0, "Model moments vs c₀ (distributed)", fontsize=18)
+display(fig_c0)
+
+println("Parameter sweeps completed!")
 end
 
-# Plot 2x2 objective curves with baseline marker
-f = Figure(size=(1000, 800))
-for (idx, s) in enumerate(param_syms)
-    row = Int(ceil(idx / 2))
-    col = (idx % 2 == 0) ? 2 : 1
-    ax = Axis(f[row, col]; title=@sprintf("Objective vs %s", String(s)), xlabel=@sprintf("%s", String(s)), ylabel="Objective")
-    xvals, yvals = obj_profiles[s]
-    lines!(ax, xvals, yvals, color=:dodgerblue)
-    vlines!(ax, [getfield(prim, s)]; color=:red, linestyle=:dash, linewidth=2)
-end
-display(f) 
+# Select what parameters to estimate
+params_to_estimate = [:aₕ, :bₕ, :c₀, :χ, :A₁, :ν, :ψ₀, :ϕ, :κ₀]
 
-# Perturb parameters and track them
-perturbed_params = perturb_parameters(prim; scale=0.15)
-println("\nPerturbed parameters:")
-for (k, v) in perturbed_params
-    println("  $k: $(round(getfield(prim, k), digits=4)) → $(round(v, digits=4))")
-end
+# Select initial values for the parameters (#! For this test we select the same values they start with)
+initial_values = [getfield(prim, k) for k in params_to_estimate]
 
-# Apply perturbations
-for (k, v) in perturbed_params
-    setfield!(prim, k, v)
-end
+# Create the estimation problem
+p = (
+    prim_base = prim,
+    res_base = res,
+    target_moments = baseline_moments,
+    param_names = params_to_estimate,
+    weighting_matrix = nothing,
+    matrix_moment_order = nothing
+);
 
-# Run estimation to recover parameters
-target_moments = original_moments
-result = simple_estimation(prim, res, target_moments; max_iter=10000, step_size=0.01)
-recovery_success = result[:objective] < 1e-3
+# Settings for the grid around the true value
+n_grid = 41
+rel_width = 0.2
 
-# Get estimated parameters
-estimated_params = result[:params]
+# Create grids
+θ0 = collect(float.(initial_values))
+grids = [range(param * (1 - rel_width), param * (1 + rel_width), n_grid) for param in θ0]
 
-# Solve with estimated parameters to get estimated moments
-for (k, v) in estimated_params
-    setfield!(prim, k, v)
-end
-_, new_res = update_params_and_resolve!(prim, res; verbose=false)
-estimated_moments = compute_model_moments(prim, new_res)
+# Ship immutable inputs to workers once
+@everywhere const P_OBJ = $p
+@everywhere const THETA0 = $θ0
 
-println("Test 5 - Parameter recovery: ", recovery_success ? "PASS" : "FAIL")
-
-# Print comparison tables
-println("\n" * "="^80)
-println("PARAMETER COMPARISON TABLE")
-println("="^80)
-@printf "%-12s %12s %12s %12s %12s\n" "Parameter" "Original" "Perturbed" "Estimated" "Error %"
-println("-"^80)
-for param in [:A₁, :ψ₀, :ν, :a_h, :b_h, :χ, :c₀]
-    orig = original_params[param]
-    pert = perturbed_params[param]
-    est = estimated_params[param]
-    error_pct = abs(est - orig) / orig * 100
-    @printf "%-12s %12.4f %12.4f %12.4f %12.2f%%\n" param orig pert est error_pct
+# Worker-side evaluation for one parameter's grid
+@everywhere function eval_param_grid(i::Int, grid)
+    fvals = Vector{Float64}(undef, length(grid))
+    θ = copy(THETA0)
+    for j in eachindex(grid)
+        θ[i] = grid[j]
+        fvals[j] =  objective_function(θ, P_OBJ)
+    end
+    return fvals
 end
 
-println("\n" * "="^80)
-println("MOMENTS COMPARISON TABLE")
-println("="^80)
-@printf "%-35s %12s %12s %12s\n" "Moment" "Original" "Estimated" "Error %"
-println("-"^80)
 
-moment_fields = fieldnames(typeof(original_moments))
-for field in moment_fields
-    orig = getfield(original_moments, field)
-    est = getfield(estimated_moments, field)
-    error_pct = abs(est - orig) / abs(orig) * 100
-    @printf "%-35s %12.4f %12.4f %12.2f%%\n" field orig est error_pct
+# Run each parameter's profile on a different core
+n_params = length(params_to_estimate)
+fvals_shared = SharedArray{Float64}(n_params, n_grid)
+fill!(fvals_shared, NaN)
+
+results = pmap(i -> eval_param_grid(i, grids[i]), 1:n_params)
+for i in 1:n_params
+    fvals_shared[i, :] = results[i]
 end
 
-println("\nFinal objective value: $(round(result[:objective], digits=6))")
-println("Recovery $(recovery_success ? "SUCCESSFUL" : "FAILED")")
-println("="^80)
+# Plot on master only
+fig = Figure(size = (1200, 900))
+for i in eachindex(params_to_estimate)
+    row = ((i - 1) ÷ 3) + 1
+    col = ((i - 1) % 3) + 1
+    ax = Axis(fig[row, col],
+        title = string(params_to_estimate[i]),
+        xlabel = "parameter value",
+        ylabel = "objective value"
+    )
+
+    grid = grids[i]
+    fvals = collect(view(fvals_shared, i, :))
+
+    lines!(ax, grid, fvals, color = :steelblue)
+    vlines!(ax, [θ0[i]], color = :red, linestyle = :dash, linewidth = 2)
+
+    finite_idx = findall(isfinite, fvals)
+    if !isempty(finite_idx)
+        jmin = finite_idx[argmin(@view fvals[finite_idx])]
+        scatter!(ax, [grid[jmin]], [fvals[jmin]], color = :orange, markersize = 8)
+    end
+end
+
+fig[4, 1:3] = Label(fig, "Objective function profiles", fontsize = 18)
+display(fig)
 
 
+
+
+# --- 1. Central Setup (Done on the main processor) ---
+
+# Load the model and solve for the "true" state
+prim_true, res_true = initializeModel(config);
+solve_model(prim_true, res_true, verbose=false)
+target_moments = compute_model_moments(prim_true, res_true);
+
+true_values = Dict(k => getfield(prim_true, k) for k in params_to_estimate)
+
+# --- 2. Define the 1D Objective Function ---
+# This function will be sent to all worker processes.
+@everywhere function objective_1D(x, p)
+    # x[1] is the single parameter value being tested by the optimizer
+    # p contains all other fixed data
+    
+    # Create a dictionary of all parameters, starting with the true values
+    # allow Dual numbers to be stored
+    params_for_model = Dict{Symbol,Any}(p.true_values)
+    params_for_model[p.param_to_estimate] = x[1]
+
+    # Create a fresh, non-mutated copy of the primitives
+    prim_new = deepcopy(p.prim_base)
+    update_primitives!(prim_new; params_for_model...) # Update with the mixed dict
+    
+    # Solve the model with the new parameters
+    res_new = Results(prim_new)
+    solve_model(prim_new, res_new, verbose=false)
+
+    # Compute moments and the final distance
+    model_moments = compute_model_moments(prim_new, res_new)
+    return compute_distance(model_moments, p.target_moments)
+end
+
+
+# --- 3. Run the Distributed Loop ---
+
+println("Starting parallel 1D estimations for $(length(params_to_estimate)) parameters...")
+
+# Use @distributed to run the for loop in parallel
+# The `vcat` reducer will collect the results from each worker into a single array
+results = @distributed (vcat) for param_name in params_to_estimate
+    
+    # --- This code block runs on a separate worker for each parameter ---
+    
+    # Get the true value and a starting guess for this specific parameter
+    true_val = true_values[param_name]
+    initial_guess = [true_val * 0.9] # Start 10% away
+
+    # Set reasonable bounds (e.g., +/- 50% of the true value) to help the optimizer
+    lower_bound = [true_val * 0.5]
+    upper_bound = [true_val * 1.5]
+
+    # The 'p' container now also includes the name of the parameter for this job
+    p = (
+        prim_base = prim_true,
+        res_base = res_true,
+        target_moments = target_moments,
+        param_to_estimate = param_name,
+        true_values = true_values # Pass all true values for the other fixed params
+    )
+
+    # Define the optimization function for this 1D problem
+    opt_func = OptimizationFunction(objective_1D, Optimization.AutoForwardDiff())
+    prob = OptimizationProblem(opt_func, initial_guess, p, lb=lower_bound, ub=upper_bound)
+
+    # Solve the 1D problem
+    solution = solve(prob, BFGS())
+
+    # Return a tuple of results for this parameter
+    (param=param_name, true_val=true_val, estimated=solution.u[1], objective=solution.objective)
+end
+
+
+# --- 4. Display Results (Back on the main processor) ---
+
+println("\n--- Parameter Recovery Results (1D Estimations) ---")
+for res in results
+    @printf "  -> %-5s | True: %-10.4f | Estimated: %-10.4f | Final Obj: %.2e\n" res.param res.true_val res.estimated res.objective
+end
