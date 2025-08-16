@@ -147,20 +147,26 @@ _zero_moments(θ::T) where {T<:Real}
 
 Return a NamedTuple of zero-initialized moment statistics, with market_tightness set to θ.
 """
-function _zero_moments(θ::T)::NamedTuple where {T<:Real}
-    return (
-        mean_logwage = 0.0, var_logwage = 0.0, mean_logwage_inperson = 0.0,
-        mean_logwage_remote = 0.0, diff_logwage_inperson_remote = 0.0, hybrid_share = 0.0,
-        agg_productivity = 0.0, dlogw_dpsi_mean_RH = 0.0, mean_logwage_RH_lowpsi = 0.0,
-        mean_logwage_RH_highpsi = 0.0, diff_logwage_RH_high_lowpsi = 0.0, 
-        mean_alpha_highpsi = 0.0, mean_alpha_lowpsi = 0.0, diff_alpha_high_lowpsi = 0.0,
-        var_logwage_highpsi = 0.0, var_logwage_lowpsi = 0.0, 
-        ratio_var_logwage_high_lowpsi = 0.0, market_tightness = θ,
-    )
+function _zero_moments(θ::T; keys::Union{Nothing, Vector{Symbol}}=nothing) where {T<:Real}
+    # default full list (keeps previous names available)
+    default_keys = [
+        :mean_logwage, :var_logwage, :mean_logwage_inperson, :mean_logwage_remote,
+        :diff_logwage_inperson_remote, :hybrid_share, :agg_productivity, :dlogw_dpsi_mean_RH,
+        :mean_logwage_RH_lowpsi, :mean_logwage_RH_highpsi, :diff_logwage_RH_high_lowpsi,
+        :mean_alpha_highpsi, :mean_alpha_lowpsi, :diff_alpha_high_lowpsi,
+        :var_logwage_highpsi, :var_logwage_lowpsi, :ratio_var_logwage_high_lowpsi,
+        :market_tightness
+    ]
+    use_keys = isnothing(keys) ? default_keys : keys
+    out = Dict{Symbol, T}()
+    for k in use_keys
+        out[k] = k == :market_tightness ? θ : zero(T)
+    end
+    return out
 end
 
 """
-_compute_mean_var(sum_x, sum_x2, sum_wts)
+    compute_mean_var(sum_x, sum_x2, sum_wts)
 
 Compute the weighted mean μ and non-negative variance σ² from the sums:
 μ = sum_x / sum_wts, σ² = max(0.0, (sum_x2 / sum_wts) - μ^2).
@@ -265,153 +271,160 @@ Usage
 Place this docstring immediately above the `compute_model_moments` function definition.
 """
 function compute_model_moments(
-                                prim::Primitives{T}, 
+                                prim::Primitives{T},
                                 res::Results{T};
-                                q_low_cut::T=0.5, 
-                                q_high_cut::T=0.75
-                            )::NamedTuple{(:mean_logwage, :var_logwage, :mean_logwage_inperson, :mean_logwage_remote, 
-                                        :diff_logwage_inperson_remote, :hybrid_share, :agg_productivity, :dlogw_dpsi_mean_RH, 
-                                        :mean_logwage_RH_lowpsi, :mean_logwage_RH_highpsi, :diff_logwage_RH_high_lowpsi, 
-                                        :mean_alpha_highpsi, :mean_alpha_lowpsi, :diff_alpha_high_lowpsi, 
-                                        :var_logwage_highpsi, :var_logwage_lowpsi, :ratio_var_logwage_high_lowpsi, 
-                                        :market_tightness), NTuple{18, T}} where {T<:Real}
+                                q_low_cut::T=0.5,
+                                q_high_cut::T=0.75,
+                                include::Union{Nothing, Vector{Symbol}, Symbol}=nothing
+                            ) where {T<:Real}
+    # If user passes include = :all or nothing -> keep default (the previously returned set)
+    default_keys = [
+        :mean_logwage, :var_logwage, :mean_alpha, :diff_logwage_inperson_remote,
+        :hybrid_share, :agg_productivity, :dlogw_dpsi_mean_RH,
+        :mean_logwage_RH_lowpsi, :mean_logwage_RH_highpsi, :diff_logwage_RH_high_lowpsi,
+        :mean_alpha_highpsi, :mean_alpha_lowpsi, :diff_alpha_high_lowpsi,
+        :var_logwage_highpsi, :var_logwage_lowpsi, :ratio_var_logwage_high_lowpsi,
+        :diff_logwage_inperson_remote, :market_tightness
+    ]
+
+    # Normalize include argument to a Vector{Symbol} or nothing
+    if include === :all
+        include_keys = default_keys
+    elseif isa(include, Vector{Symbol})
+        include_keys = include
+    elseif include === nothing
+        include_keys =[
+                        :mean_logwage,                                                #> Average of log(wages)
+                        :var_logwage,                                                  #> Variance of log(wages)
+                        :mean_alpha,                                                    #> Average of alpha
+                        #// :mean_logwage_inperson,                              #> Average of log(wages) for in-person workers
+                        #// :mean_logwage_remote,                                  #> Average of log(wages) for remote workers
+                        :diff_logwage_inperson_remote,                #> Difference in average log(wages) between in-person and remote workers
+                        #//:hybrid_share,                                                #> Share of hybrid workers
+                        :agg_productivity,                                        #> Aggregate productivity
+                        :dlogw_dpsi_mean_RH,                                    #> Elasticity of log(wages) with respect to market tightness for remote workers
+                        #//mean_logwage_RH_lowpsi,                            #> Average of log(wages) for remote workers in low-psi region
+                        #//mean_logwage_RH_highpsi,                          #> Average of log(wages) for remote workers in high-psi region
+                        :diff_logwage_RH_high_lowpsi,                  #> Difference in average log(wages) between high-psi and low-psi regions
+                        #//mean_alpha_highpsi,                                    #> Average of alpha for remote workers in high-psi region
+                        #//mean_alpha_lowpsi,                                      #> Average of alpha for remote workers in low-psi region
+                        :diff_alpha_high_lowpsi,                            #> Difference in average alpha between high-psi and low-psi regions
+                        #//var_logwage_highpsi,                                  #> Variance of log(wages) for remote workers in high-psi region
+                        #//var_logwage_lowpsi,                                    #> Variance of log(wages) for remote workers in low-psi region
+                        #//ratio_var_logwage_high_lowpsi,              #> Ratio of variances of log(wages) between high-psi and low-psi regions
+                        :market_tightness                                                   #> Market tightness (V/U ratio)
+        ]
+    else
+        throw(ArgumentError("`include` must be nothing, :all, or Vector{Symbol}"))
+    end
 
     # Extract key objects
-    n::Matrix{T} = res.n           # Employment distribution n(h,ψ) 
-    w::Matrix{T} = res.w_policy    # Equilibrium wages w*(h,ψ)
-    α::Matrix{T} = res.α_policy    # Optimal work arrangements α*(h,ψ)
-    
-    @unpack h_grid, ψ_grid, ψ_cdf, A₁, ψ₀, ϕ, ν, χ, ξ, β, δ = prim
+    n::Matrix{T} = res.n
+    w::Matrix{T} = res.w_policy
+    α::Matrix{T} = res.α_policy
+
+    @unpack h_grid, ψ_grid, ψ_cdf = prim
+    # production_fun etc. left unchanged (use `prim` fields inside)
     production_fun = (h, ψ, α) -> (prim.A₀ + prim.A₁*h) * ((1 - α) + α * (prim.ψ₀ * h^prim.ϕ * ψ^prim.ν))
-    utility_fun    = (w, α)    -> w - prim.c₀ * (1 - α)^(prim.χ + 1) / (prim.χ + 1)
-    matching_fun   = (V, U)    -> prim.γ₀ * U^prim.γ₁ * V^(1 - prim.γ₁)
 
     total_emp::T = sum(n)
-
-    # Early return for degenerate case
     if !(ForwardDiff.value(total_emp) > 0)
-        return _zero_moments(res.θ)
+        return _zero_moments(res.θ; keys=include_keys)
     end
 
     # Pre-compute masks and tolerance
     αtol::Float64 = 1e-8
     valid::BitMatrix = (n .> 0.0) .& (w .> 0.0)
-    
+
     # Determine ψ quantile boundaries for firm type grouping
     n_ψ::Int = length(ψ_grid)
     idx_low_end::Int = _find_quantile_index(ψ_cdf, q_low_cut, n_ψ)
     idx_high_start::Int = max(_find_quantile_index(ψ_cdf, q_high_cut, n_ψ), idx_low_end + 1)
 
-    # Initialize all accumulators for single-pass computation
-    # Unconditional wage moments
+    # Initialize accumulators (only numeric scalars; we'll select which to return later)
+    sum_alpha::T = 0.0
+    total_employment::T = 0.0
+
     sum_wts::T = 0.0
     sum_logw::T = 0.0
     sum_logw2::T = 0.0
 
-    # Work arrangement conditional moments
     sum_n_inperson::T = 0.0; sum_logw_inperson::T = 0.0
     sum_n_remote::T = 0.0; sum_logw_remote::T = 0.0
-    sum_n_interior::T = 0.0  # Hybrid workers (0 < α* < 1)
+    sum_n_interior::T = 0.0
 
-    # Productivity moment
     sum_production::T = 0.0
 
-    # Wage-productivity elasticity among remote/hybrid workers
-    # Economic interpretation: ∂log(w)/∂ψ measures how responsive wages are to firm 
-    # productivity improvements, conditional on offering flexible work arrangements
     sum_dlogw_dpsi_RH::T = 0.0
     sum_n_RH::T = 0.0
-    
-    # ψ-group conditional moments (for first-stage estimation)
-    # Low-ψ firms (bottom quantile)
+
     sum_n_low::T = 0.0; sum_alpha_low::T = 0.0
     sum_logw_low::T = 0.0; sum_logw2_low::T = 0.0
     sum_logw_RH_low::T = 0.0; sum_n_RH_low::T = 0.0
 
-    # High-ψ firms (top quantile)
     sum_n_high::T = 0.0; sum_alpha_high::T = 0.0
     sum_logw_high::T = 0.0; sum_logw2_high::T = 0.0
     sum_logw_RH_high::T = 0.0; sum_n_RH_high::T = 0.0
 
-    # Single pass through all (h,ψ) combinations
+    # Single pass
     for (i_h, h) in enumerate(h_grid)
         for (i_ψ, ψ) in enumerate(ψ_grid)
             n_cell::T = n[i_h, i_ψ]
-            
-            # Skip zero-employment cells
             n_cell > 0.0 || continue
+
+            alpha_cell = α[i_h, i_ψ]
+            sum_alpha += alpha_cell * n_cell
+            total_employment += n_cell
 
             w_cell::T = w[i_h, i_ψ]
             α_cell::T = α[i_h, i_ψ]
 
-            # Determine cell characteristics
-            is_valid::Bool = valid[i_h, i_ψ]  # Positive wage
+            is_valid::Bool = valid[i_h, i_ψ]
             is_inperson::Bool = ForwardDiff.value(α_cell) <= αtol
-            is_remote::Bool = ForwardDiff.value(α_cell) >= (1.0 - αtol) 
+            is_remote::Bool = ForwardDiff.value(α_cell) >= (1.0 - αtol)
             is_interior::Bool = (ForwardDiff.value(α_cell) > αtol) && (ForwardDiff.value(α_cell) < (1.0 - αtol))
-            is_RH::Bool = ForwardDiff.value(α_cell) > αtol  # Remote or hybrid
+            is_RH::Bool = ForwardDiff.value(α_cell) > αtol
             is_low_psi::Bool = i_ψ <= idx_low_end
             is_high_psi::Bool = i_ψ >= idx_high_start
 
-            # Aggregate productivity (all employed workers)
             sum_production += production_fun(h, ψ, α_cell) * n_cell
-            
-            # Skip wage-based moments if wage is non-positive
+
             if !is_valid
-                # Still accumulate α moments and employment counts
-                if is_low_psi
-                    sum_n_low += n_cell
-                    sum_alpha_low += α_cell * n_cell
-                end
-                if is_high_psi
-                    sum_n_high += n_cell
-                    sum_alpha_high += α_cell * n_cell
-                end
-                if is_interior
-                    sum_n_interior += n_cell
-                end
                 continue
             end
-            
+
             logw_cell::T = log(w_cell)
-            
-            # Unconditional wage moments (all valid employed workers)
+
             sum_wts += n_cell
             sum_logw += logw_cell * n_cell
             sum_logw2 += (logw_cell^2) * n_cell
-            
-            # Work arrangement conditional moments
+
             if is_inperson
-                sum_n_inperson += n_cell
                 sum_logw_inperson += logw_cell * n_cell
+                sum_n_inperson += n_cell
             elseif is_remote
-                sum_n_remote += n_cell  
                 sum_logw_remote += logw_cell * n_cell
+                sum_n_remote += n_cell
             end
-            
+
             if is_interior
                 sum_n_interior += n_cell
             end
-            
-            # Remote/hybrid wage-productivity elasticity
-            # Economic model: ∂w*/∂ψ = A₁h(∂g/∂ψ)[ξα*/(1-β(1-δ)) - (1-α*)/χ]
-            # This captures how wage responds to firm productivity for flexible arrangements
+            # Remote/hybrid wage-productivity elasticity 
             if is_RH
                 # Marginal productivity of firm type: ∂g/∂ψ where g(h,ψ) = ψ₀h^ϕψ^ν
-                dg_dpsi::T = ψ₀ * (h^ϕ) * (ν * ψ^(ν - 1))
+                dg_dpsi::T = prim.ψ₀ * (h^prim.ϕ) * (prim.ν * ψ^(prim.ν - 1))
 
                 # Wage derivative incorporating Nash bargaining and arrangement costs
-                # First term: remote productivity advantage (ξ = remote productivity factor)
-                # Second term: arrangement cost savings (χ = cost elasticity parameter)
-                dw_dpsi::T = A₁ * h * dg_dpsi * (
-                    (ξ * α_cell) / (1.0 - β * (1.0 - δ)) - (1.0 - α_cell) / χ
+                dw_dpsi::T = prim.A₁ * h * dg_dpsi * (
+                    (prim.ξ * α_cell) / (1.0 - prim.β * (1.0 - prim.δ)) - (1.0 - α_cell) / prim.χ
                 )
                 
                 sum_dlogw_dpsi_RH += (dw_dpsi / w_cell) * n_cell
                 sum_n_RH += n_cell
             end
-            
-            # ψ-group moments (for identification of firm heterogeneity effects)
+
+            # ψ-group moments 
             if is_low_psi
                 sum_n_low += n_cell
                 sum_alpha_low += α_cell * n_cell
@@ -423,7 +436,7 @@ function compute_model_moments(
                     sum_n_RH_low += n_cell
                 end
             end
-            
+
             if is_high_psi
                 sum_n_high += n_cell
                 sum_alpha_high += α_cell * n_cell
@@ -435,53 +448,67 @@ function compute_model_moments(
                     sum_n_RH_high += n_cell
                 end
             end
+
+
         end
     end
 
-    # Compute final moments with numerical safeguards
-    mean_logwage::T, var_logwage::T = _compute_mean_var(sum_logw, sum_logw2, sum_wts)
+    mean_alpha = total_employment > 0 ? sum_alpha / total_employment : 0.0
+    mean_logwage, var_logwage = _compute_mean_var(sum_logw, sum_logw2, sum_wts)
+    mean_logwage_inperson = ForwardDiff.value(sum_n_inperson) > 0 ? sum_logw_inperson / sum_n_inperson : 0.0
+    mean_logwage_remote = ForwardDiff.value(sum_n_remote) > 0 ? sum_logw_remote / sum_n_remote : 0.0
+    diff_logwage_inperson_remote = mean_logwage_inperson - mean_logwage_remote
 
-    mean_logwage_inperson::T = ForwardDiff.value(sum_n_inperson) > 0 ? sum_logw_inperson / sum_n_inperson : 0.0
-    mean_logwage_remote::T = ForwardDiff.value(sum_n_remote) > 0 ? sum_logw_remote / sum_n_remote : 0.0
-    diff_logwage_inperson_remote::T = mean_logwage_inperson - mean_logwage_remote
+    hybrid_share = ForwardDiff.value(sum_n_interior) / ForwardDiff.value(total_emp)
+    agg_productivity = ForwardDiff.value(sum_production) / ForwardDiff.value(total_emp)
+    dlogw_dpsi_mean_RH = ForwardDiff.value(sum_n_RH) > 0 ? sum_dlogw_dpsi_RH / sum_n_RH : 0.0
 
-    hybrid_share::T = ForwardDiff.value(sum_n_interior) / ForwardDiff.value(total_emp)
-    agg_productivity::T = ForwardDiff.value(sum_production) / ForwardDiff.value(total_emp)
-    dlogw_dpsi_mean_RH::T = ForwardDiff.value(sum_n_RH) > 0 ? sum_dlogw_dpsi_RH / sum_n_RH : 0.0
+    mean_logwage_RH_lowpsi = ForwardDiff.value(sum_n_RH_low) > 0 ? sum_logw_RH_low / sum_n_RH_low : 0.0
+    mean_logwage_RH_highpsi = ForwardDiff.value(sum_n_RH_high) > 0 ? sum_logw_RH_high / sum_n_RH_high : 0.0
+    diff_logwage_RH_high_lowpsi = mean_logwage_RH_highpsi - mean_logwage_RH_lowpsi
 
-    # First-stage moments for firm heterogeneity identification
-    mean_logwage_RH_lowpsi::T = ForwardDiff.value(sum_n_RH_low) > 0 ? sum_logw_RH_low / sum_n_RH_low : 0.0
-    mean_logwage_RH_highpsi::T = ForwardDiff.value(sum_n_RH_high) > 0 ? sum_logw_RH_high / sum_n_RH_high : 0.0
-    diff_logwage_RH_high_lowpsi::T = mean_logwage_RH_highpsi - mean_logwage_RH_lowpsi
+    mean_alpha_lowpsi = ForwardDiff.value(sum_n_low) > 0 ? sum_alpha_low / sum_n_low : 0.0
+    mean_alpha_highpsi = ForwardDiff.value(sum_n_high) > 0 ? sum_alpha_high / sum_n_high : 0.0
+    diff_alpha_high_lowpsi = mean_alpha_highpsi - mean_alpha_lowpsi
 
-    mean_alpha_lowpsi::T = ForwardDiff.value(sum_n_low) > 0 ? sum_alpha_low / sum_n_low : 0.0
-    mean_alpha_highpsi::T = ForwardDiff.value(sum_n_high) > 0 ? sum_alpha_high / sum_n_high : 0.0
-    diff_alpha_high_lowpsi::T = mean_alpha_highpsi - mean_alpha_lowpsi
-    
-    _, var_logwage_lowpsi::T = _compute_mean_var(sum_logw_low, sum_logw2_low, sum_n_low)
-    _, var_logwage_highpsi::T = _compute_mean_var(sum_logw_high, sum_logw2_high, sum_n_high)
-    ratio_var_logwage_high_lowpsi::T = ForwardDiff.value(var_logwage_lowpsi) > 0 ? var_logwage_highpsi / var_logwage_lowpsi : 0.0
+    _, var_logwage_lowpsi = _compute_mean_var(sum_logw_low, sum_logw2_low, sum_n_low)
+    _, var_logwage_highpsi = _compute_mean_var(sum_logw_high, sum_logw2_high, sum_n_high)
+    ratio_var_logwage_high_lowpsi = ForwardDiff.value(var_logwage_lowpsi) > 0 ? var_logwage_highpsi / var_logwage_lowpsi : 0.0
 
-    return (
-        mean_logwage = mean_logwage,                                                #> Average of log(wages)
-        var_logwage = var_logwage,                                                  #> Variance of log(wages)
-        mean_logwage_inperson = mean_logwage_inperson,                              #> Average of log(wages) for in-person workers
-        mean_logwage_remote = mean_logwage_remote,                                  #> Average of log(wages) for remote workers
-        diff_logwage_inperson_remote = diff_logwage_inperson_remote,                #> Difference in average log(wages) between in-person and remote workers
-        hybrid_share = hybrid_share,                                                #> Share of hybrid workers
-        agg_productivity = agg_productivity,                                        #> Aggregate productivity
-        dlogw_dpsi_mean_RH = dlogw_dpsi_mean_RH,                                    #> Elasticity of log(wages) with respect to market tightness for remote workers
-        mean_logwage_RH_lowpsi = mean_logwage_RH_lowpsi,                            #> Average of log(wages) for remote workers in low-psi region
-        mean_logwage_RH_highpsi = mean_logwage_RH_highpsi,                          #> Average of log(wages) for remote workers in high-psi region
-        diff_logwage_RH_high_lowpsi = diff_logwage_RH_high_lowpsi,                  #> Difference in average log(wages) between high-psi and low-psi regions
-        mean_alpha_highpsi = mean_alpha_highpsi,                                    #> Average of alpha for remote workers in high-psi region
-        mean_alpha_lowpsi = mean_alpha_lowpsi,                                      #> Average of alpha for remote workers in low-psi region
-        diff_alpha_high_lowpsi = diff_alpha_high_lowpsi,                            #> Difference in average alpha between high-psi and low-psi regions
-        var_logwage_highpsi = var_logwage_highpsi,                                  #> Variance of log(wages) for remote workers in high-psi region
-        var_logwage_lowpsi = var_logwage_lowpsi,                                    #> Variance of log(wages) for remote workers in low-psi region
-        ratio_var_logwage_high_lowpsi = ratio_var_logwage_high_lowpsi,              #> Ratio of variances of log(wages) between high-psi and low-psi regions
-        market_tightness = res.θ,               #
+    # Build results dictionary and only keep requested keys
+    full = Dict{Symbol, T}(
+        :mean_logwage => mean_logwage,
+        :var_logwage => var_logwage,
+        :mean_alpha => mean_alpha,
+        :mean_logwage_inperson => mean_logwage_inperson,
+        :mean_logwage_remote => mean_logwage_remote,
+        :diff_logwage_inperson_remote => diff_logwage_inperson_remote,
+        :hybrid_share => hybrid_share,
+        :agg_productivity => agg_productivity,
+        :dlogw_dpsi_mean_RH => dlogw_dpsi_mean_RH,
+        :mean_logwage_RH_lowpsi => mean_logwage_RH_lowpsi,
+        :mean_logwage_RH_highpsi => mean_logwage_RH_highpsi,
+        :diff_logwage_RH_high_lowpsi => diff_logwage_RH_high_lowpsi,
+        :mean_alpha_highpsi => mean_alpha_highpsi,
+        :mean_alpha_lowpsi => mean_alpha_lowpsi,
+        :diff_alpha_high_lowpsi => diff_alpha_high_lowpsi,
+        :var_logwage_highpsi => var_logwage_highpsi,
+        :var_logwage_lowpsi => var_logwage_lowpsi,
+        :ratio_var_logwage_high_lowpsi => ratio_var_logwage_high_lowpsi,
+        :market_tightness => res.θ
     )
+
+    result = Dict{Symbol, T}()
+    for k in include_keys
+        if haskey(full, k)
+            result[k] = full[k]
+        else
+            # if user requested a key that wasn't computed, fill with zero
+            result[k] = zero(T)
+        end
+    end
+
+    return result
 end
 
 """
@@ -489,22 +516,21 @@ end
 
 Save model moments to a YAML file for later use as target moments in estimation.
 """
-function save_moments_to_yaml(moments::NamedTuple, filename::String)
-    moments_dict = Dict(string(k) => v for (k, v) in pairs(moments))
-    YAML.write_file(filename, moments_dict)
+function save_moments_to_yaml(moments::Union{NamedTuple, AbstractDict}, filename::String)
+    # Convert either NamedTuple or Dict to a Dict{String, Any}
+    md = Dict{String, Any}()
+    for k in keys(moments)
+        v = moments isa AbstractDict ? moments[k] : getproperty(moments, k)
+        md[string(k)] = v
+    end
+    YAML.write_file(filename, md)
     println("Saved moments to: $filename")
 end
 
-"""
-    load_moments_from_yaml(filename::String) -> NamedTuple
-
-Load target moments from a YAML file and convert back to NamedTuple.
-"""
 function load_moments_from_yaml(filename::String)
     moments_dict = YAML.load_file(filename)
-    moment_keys = Symbol.(collect(Base.keys(moments_dict)))
-    moment_values = collect(Base.values(moments_dict))
-    return NamedTuple{Tuple(moment_keys)}(moment_values)
+    # Return as Dict{Symbol, Any} so downstream code can index by Symbol keys
+    return Dict(Symbol(k) => v for (k,v) in pairs(moments_dict))
 end
 
 """
@@ -597,23 +623,24 @@ Examples
     compute_distance(model, data, W, [:m2, :m1])
 """
 function compute_distance(
-                            model_moments::NamedTuple, 
-                            data_moments::NamedTuple,
+                            model_moments::Union{NamedTuple, AbstractDict},
+                            data_moments::Union{NamedTuple, AbstractDict},
                             weighting_matrix::Union{Matrix, Nothing}=nothing,
                             matrix_moment_order::Union{Vector{Symbol}, Nothing}=nothing
                         )
-    
-    # Step 1: Get moment names and create the error vector `g`
-    moment_keys = keys(model_moments)
-    g = [model_moments[k] - data_moments[k] for k in moment_keys]
+    # Collect moment keys as symbols in the order provided by model_moments
+    current_moment_order = Symbol.(collect(keys(model_moments)))
 
-    # If no weighting matrix is provided, return the simple sum of squared errors
+    # Helper to extract value for either NamedTuple or Dict
+    get_val(m, k) = m isa AbstractDict ? (haskey(m, k) ? m[k] : error("missing moment $k")) :
+                             (k in propertynames(m) ? getproperty(m, k) : error("missing moment $k"))
+
+    g = [ get_val(model_moments, k) - get_val(data_moments, k) for k in current_moment_order ]
+
     if isnothing(weighting_matrix)
-        return dot(g, g) # dot(g, g) is an efficient way to write g' * g
+        return dot(g, g)
     end
 
-    # Step 2: Re-shuffle the weighting matrix if needed
-    current_moment_order = collect(moment_keys)
     if !isnothing(matrix_moment_order) && current_moment_order != matrix_moment_order
         perm_indices = indexin(current_moment_order, matrix_moment_order)
         W = weighting_matrix[perm_indices, perm_indices]
@@ -621,8 +648,7 @@ function compute_distance(
         W = weighting_matrix
     end
 
-    # Step 3: Return the final weighted distance
-    return g' * W * g 
+    return g' * W * g
 end
 
 function objective_function(params, p)
