@@ -3,11 +3,11 @@ ModelParameters:
   kappa1: 1.0         # Vacancy posting cost parameter 1
   beta: 0.996         # Time discount factor
   delta: 0.011        # Baseline job destruction rate
-  b: 0.4              # Unemployment benefits
+  b: 0.7             # Unemployment benefits
   xi: 0.5             # Worker bargaining power
   A0: 0.0             # Production function constant
-  A1: 1.0             # Production function coefficient for skill
-  psi_0: 1.2          # Remote work amenability base parameter
+  A1: 1.62            # Production function coefficient for skill
+  psi_0: 1.05          # Remote work amenability base parameter
   phi: 0.3            # Exponent for skill in remote productivity
   nu: 1.0             # Exponent for psi in remote productivity
   c0: 0.2             # Utility function cost parameter
@@ -16,9 +16,9 @@ ModelParameters:
   gamma1: 0.5         # Matching function elasticity parameter
   a_h: 2.0            # Beta distribution shape parameter a for skill
   b_h: 5.0            # Beta distribution shape parameter b for skill
-  n_psi: 101          # Number of grid points for psi
 ModelGrids:
-  n_ψ: 101            # Number of grid points for psi (duplicate for compatibility)
+  n_psi: 301          # Number of grid points for psi
+  n_ψ: 301            # Number of grid points for psi (duplicate for compatibility)
   psi_min: 0.0        # Minimum value for psi grid
   psi_max: 1.0        # Maximum value for psi grid
   psi_data: /Users/mitchv34/Work/WFH/data/results/psi_distribution_Pre_COVID.csv  # Path to empirical psi data
