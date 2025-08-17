@@ -78,48 +78,85 @@ Example
     new_prim, new_res = update_primitives_results(prim, res, Dict(:a_h => 2.0, :b_h => 5.0))
 """
 function update_primitives_results(
-                            prim::Primitives,
-                            res::Results,
-                            params_to_update::Dict=Dict()
-                            ; kwargs...)
-    prim_fields = Set(fieldnames(Primitives))
-    pairs = Dict([ k => (haskey(params_to_update, k) ? params_to_update[k] : getfield(prim, k)) for k in prim_fields ])
-    
-    h_dist_keys = Set([:a_h, :b_h])
-    alpha_keys  = Set([:A₀, :A₁, :ψ₀, :ϕ, :ν, :c₀, :χ, :γ₀, :γ₁])
+                                    prim::Primitives,
+                                    res::Results,
+                                    params_to_update::Dict=Dict();
+                                    kwargs...,
+                                )
+    # --- Stage 1: Read current values or overrides (type-stable locals) ---
+    # Scalars
+    A₀   = get(params_to_update, :A₀, prim.A₀)
+    A₁   = get(params_to_update, :A₁, prim.A₁)
+    ψ₀   = get(params_to_update, :ψ₀, prim.ψ₀)
+    ϕ    = get(params_to_update, :ϕ,  prim.ϕ)
+    ν    = get(params_to_update, :ν,  prim.ν)
+    c₀   = get(params_to_update, :c₀, prim.c₀)
+    χ    = get(params_to_update, :χ,  prim.χ)
+    γ₀   = get(params_to_update, :γ₀, prim.γ₀)
+    γ₁   = get(params_to_update, :γ₁, prim.γ₁)
 
-    # Flags for alpha recomputation
-    old_values = Dict(k => getfield(prim, k) for k in keys(params_to_update))
-    recompute_h_dist = any(k -> (k in h_dist_keys) && (pairs[k] != old_values[k]), keys(params_to_update))
-    recompute_alpha  = any(k -> (k in alpha_keys)  && (pairs[k] != old_values[k]), keys(params_to_update))
-    
-    # Update h distribution if needed (keep same grid points)
-    if true #recompute_h_dist
-        #TODO figure out why it allways evaluates to false
-        h_values = pairs[:h_grid]
-        h_min, h_max = pairs[:h_min], pairs[:h_max]
-        h_scaled = (h_values .- h_min) ./ (h_max - h_min)
-        beta_dist = Distributions.Beta(pairs[:aₕ], pairs[:bₕ])
-        h_pdf_raw = pdf.(beta_dist, h_scaled)
-        h_pdf = h_pdf_raw ./ sum(h_pdf_raw)
-        pairs[:h_pdf] = h_pdf
-        h_cdf = cumsum(h_pdf)
-        h_cdf /= h_cdf[end]
-        pairs[:h_cdf] = h_cdf
+    κ₀   = get(params_to_update, :κ₀, prim.κ₀)
+    κ₁   = get(params_to_update, :κ₁, prim.κ₁)
+    βv   = get(params_to_update, :β,  prim.β)
+    δv   = get(params_to_update, :δ,  prim.δ)
+    b    = get(params_to_update, :b,  prim.b)
+    ξ    = get(params_to_update, :ξ,  prim.ξ)
+
+    # Grids and bounds
+    n_ψ   = prim.n_ψ
+    ψ_min = get(params_to_update, :ψ_min, prim.ψ_min)
+    ψ_max = get(params_to_update, :ψ_max, prim.ψ_max)
+    ψ_grid = get(params_to_update, :ψ_grid, prim.ψ_grid)
+    ψ_pdf  = get(params_to_update, :ψ_pdf,  prim.ψ_pdf)
+    ψ_cdf  = get(params_to_update, :ψ_cdf,  prim.ψ_cdf)
+
+    aₕ   = get(params_to_update, :aₕ, prim.aₕ)
+    bₕ   = get(params_to_update, :bₕ, prim.bₕ)
+    n_h  = prim.n_h
+    h_min = get(params_to_update, :h_min, prim.h_min)
+    h_max = get(params_to_update, :h_max, prim.h_max)
+    h_grid = get(params_to_update, :h_grid, prim.h_grid)
+    h_pdf  = get(params_to_update, :h_pdf,  prim.h_pdf)
+    h_cdf  = get(params_to_update, :h_cdf,  prim.h_cdf)
+
+    # --- Stage 2: Promote numeric type if needed ---
+    T_old = eltype(prim.h_grid)
+    T_new = promote_type(typeof.(values(params_to_update))..., T_old)
+    if T_new != T_old
+        # Promote scalars
+        A₀ = T_new(A₀); A₁ = T_new(A₁); ψ₀ = T_new(ψ₀); ϕ = T_new(ϕ); ν = T_new(ν)
+        c₀ = T_new(c₀); χ = T_new(χ); γ₀ = T_new(γ₀); γ₁ = T_new(γ₁)
+        κ₀ = T_new(κ₀); κ₁ = T_new(κ₁); βv = T_new(βv); δv = T_new(δv)
+        b  = T_new(b);   ξ  = T_new(ξ)
+
+        ψ_min = T_new(ψ_min); ψ_max = T_new(ψ_max)
+        aₕ = T_new(aₕ); bₕ = T_new(bₕ)
+        h_min = T_new(h_min); h_max = T_new(h_max)
+
+        # Promote vectors
+        ψ_grid = T_new.(ψ_grid); ψ_pdf = T_new.(ψ_pdf); ψ_cdf = T_new.(ψ_cdf)
+        h_grid = T_new.(h_grid); h_pdf = T_new.(h_pdf); h_cdf = T_new.(h_cdf)
     end
 
-    # Create new primitives 
+    # --- Stage 3: Recompute h distribution only if relevant params changed ---
+    recompute_h = any(k -> k in (:aₕ, :bₕ, :h_grid, :h_min, :h_max), keys(params_to_update))
+    if recompute_h
+        h_scaled = (h_grid .- h_min) ./ (h_max - h_min)
+        beta_dist = Distributions.Beta(aₕ, bₕ)
+        h_pdf_raw = pdf.(beta_dist, h_scaled)
+        h_pdf = h_pdf_raw ./ sum(h_pdf_raw)
+        h_cdf = cumsum(h_pdf)
+        h_cdf ./= h_cdf[end]
+    end
+
+    # --- Stage 4: Build validated Primitives and fresh Results ---
     new_prim = validated_Primitives(
-        A₀=pairs[:A₀], A₁=pairs[:A₁], ψ₀=pairs[:ψ₀], ϕ=pairs[:ϕ], ν=pairs[:ν], c₀=pairs[:c₀], χ=pairs[:χ], γ₀=pairs[:γ₀], γ₁=pairs[:γ₁],
-        κ₀=pairs[:κ₀], κ₁=pairs[:κ₁], β=pairs[:β], δ=pairs[:δ], b=pairs[:b], ξ=pairs[:ξ],
-        n_ψ=pairs[:n_ψ], ψ_min=pairs[:ψ_min], ψ_max=pairs[:ψ_max], ψ_grid=Vector{Float64}(pairs[:ψ_grid]),
-        ψ_pdf=Vector{Float64}(pairs[:ψ_pdf]), ψ_cdf=Vector{Float64}(pairs[:ψ_cdf]),
-        aₕ=pairs[:aₕ], bₕ=pairs[:bₕ], n_h=pairs[:n_h], h_min=pairs[:h_min], h_max=pairs[:h_max],
-        h_grid=pairs[:h_grid], h_pdf=pairs[:h_pdf], h_cdf=pairs[:h_cdf]
+        A₀=A₀, A₁=A₁, ψ₀=ψ₀, ϕ=ϕ, ν=ν, c₀=c₀, χ=χ, γ₀=γ₀, γ₁=γ₁,
+        κ₀=κ₀, κ₁=κ₁, β=βv, δ=δv, b=b, ξ=ξ,
+        n_ψ=n_ψ, ψ_min=ψ_min, ψ_max=ψ_max, ψ_grid=ψ_grid, ψ_pdf=ψ_pdf, ψ_cdf=ψ_cdf,
+        aₕ=aₕ, bₕ=bₕ, n_h=n_h, h_min=h_min, h_max=h_max, h_grid=h_grid, h_pdf=h_pdf, h_cdf=h_cdf,
     )
 
-    # Create new results
-    #TODO: Skip pre-computation of α_policy if not needed
     new_res = Results(new_prim)
     return new_prim, new_res
 end
@@ -130,15 +167,19 @@ end
 Convenience wrapper: update primitives, build a fresh Results (reusing α when allowed),
 then solve. Returns `(prim, new_res)`.
 """
-function update_params_and_resolve(prim::Primitives, res::Results; params_to_update=Dict() , kwargs...)
+function update_params_and_resolve(prim::Primitives, 
+                                res::Results;
+                                initial_S=nothing,
+                                params_to_update=Dict()
+                                , kwargs...)
     KW = Dict(kwargs)
-    new_prim, new_res = update_primitives_results(prim, res, params_to_update; kwargs...)
+    new_prim, new_res = update_primitives_results(prim, res, params_to_update)
     tol        = get(KW, :tol, 1e-7)
     max_iter   = get(KW, :max_iter, 25000)
     verbose    = get(KW, :verbose, false)
     λ_S        = get(KW, :λ_S, 0.01)
     λ_u        = get(KW, :λ_u, 0.01)
-    solve_model(new_prim, new_res; tol=tol, max_iter=max_iter, verbose=verbose, λ_S=λ_S, λ_u=λ_u)
+    # solve_model(new_prim, new_res; initial_S=initial_S, tol=tol, max_iter=max_iter, verbose=verbose, λ_S=λ_S, λ_u=λ_u)
     return new_prim, new_res
 end
 
@@ -190,7 +231,7 @@ function _compute_mean_var(sum_x::T, sum_x2::T, sum_wts::T)::Tuple{T, T} where {
 end
 
 """Return the index of the first entry in `cdf` whose ForwardDiff.value >= ForwardDiff.value(quantile); if none is found, return `n`."""
-function _find_quantile_index(cdf::Vector{T}, quantile::T, n::Int)::Int where {T<:Real}
+function _find_quantile_index(cdf::Vector{T}, quantile, n::Int)::Int where {T<:Real}
     idx = findfirst(>=(ForwardDiff.value(quantile)), ForwardDiff.value.(cdf))
     return idx === nothing ? n : idx
 end
@@ -273,8 +314,8 @@ Place this docstring immediately above the `compute_model_moments` function defi
 function compute_model_moments(
                                 prim::Primitives{T},
                                 res::Results{T};
-                                q_low_cut::T=0.5,
-                                q_high_cut::T=0.75,
+                                q_low_cut=0.5,
+                                q_high_cut=0.75,
                                 include::Union{Nothing, Vector{Symbol}, Symbol}=nothing
                             ) where {T<:Real}
     # If user passes include = :all or nothing -> keep default (the previously returned set)
@@ -651,34 +692,113 @@ function compute_distance(
     return g' * W * g
 end
 
+
+
+
 function objective_function(params, p)
-    # Unpack our fixed data and parameter names from `p`
-    prim_base = p.prim_base
-    res_base = p.res_base
-    target_moments = p.target_moments
-    param_names = p.param_names # e.g., [:A₁, :ν, :c₀]
-    weighting_matrix = p.weighting_matrix
-    matrix_moment_order = p.matrix_moment_order
-    fixed_point_options = get(p, :fixed_point_options, Dict())
+    params_to_update = Dict(p.param_names .=> params)
+    # --- WARM VS. COLD LOGIC ---
+    # Check if the parameter struct 'p' has the cache.
+    # If it does, use it for a warm start. If not, do a cold start.
+    
+    # Optional warm-start S if available
+    initial_S = haskey(p, :last_res) ? p.last_res[].S : nothing
+    
+    # Read the current solver state
+    current_solver_params = p.solver_state[] 
+    λ_S_start = current_solver_params.λ_S_init
+    λ_u_start = current_solver_params.λ_u_init
 
-    # --- Step 1: Update primitives ---
-    # Create a dictionary mapping param names to the new values from the optimizer
-    params_to_update = Dict(param_names .=> params)
 
-    # --- Step 2 update and re-solve the model ---
-    prim_new, res_new = update_params_and_resolve(
-                                                    prim_base, res_base; 
-                                                    params_to_update=params_to_update,
-                                                    fixed_point_options=fixed_point_options
-                                                )
+    # Solve with updated params (deepcopy res_base to avoid mutation across calls)
+    prim_new, res_new = update_primitives_results(
+                                                    p.prim_base, 
+                                                    deepcopy(p.res_base),
+                                                    params_to_update
+                                                    );
+    λ_S_final, λ_u_final = solve_model(
+        prim_new, res_new,
+        initial_S = initial_S,
+        tol      = get(p, :tol, 1e-7),
+        max_iter = get(p, :max_iter, 25_000),
+        verbose  = false,
+        λ_S_init      = get(p, :λ_S_init, 0.01),
+        λ_u_init      = get(p, :λ_u_init, 0.01)
+    )
 
-    # --- Step 3: Compute model moments ---
+    # Update warm-start cache
+    if haskey(p, :last_res)
+        p.last_res[] = res_new
+        # Update the solver state cache with the new final lambdas
+        p.solver_state[] = (λ_S_init = λ_S_final, λ_u_init = λ_u_final)
+    end
+
+    
     model_moments = compute_model_moments(prim_new, res_new)
 
-    # --- Step 4: Compute the distance ---
-    loss = compute_distance( model_moments, target_moments, weighting_matrix, matrix_moment_order )
+    return compute_distance(
+        model_moments,
+        p.target_moments,
+        get(p, :weighting_matrix, nothing),
+        get(p, :matrix_moment_order, nothing)
+    )
+end
 
-    return loss
+
+function setup_estimation_problem(
+        prim_base, res_base, target_moments, params_to_estimate;
+        initial_param_guess,
+        use_warm_start::Bool=true,
+        ad_backend=AutoForwardDiff(),
+        lower_bound=nothing,
+        upper_bound=nothing
+    )
+
+    # --- STAGE 1: BURN-IN (if enabled) ---
+    res_for_cache = if use_warm_start
+        println("Performing burn-in solve to generate warm start...")
+        params_to_update = Dict(params_to_estimate .=> initial_param_guess)
+        
+        # Note: We create a copy of res_base to avoid mutating it
+        prim_initial, res_initial_cold = update_primitives_results(prim_base, deepcopy(res_base); params_to_update=params_to_update)
+        
+        solve_model(prim_initial, res_initial_cold, verbose=false)
+        res_initial_cold # This is our warm start
+    else
+        println("Skipping burn-in. Using cold starts from res_base.")
+        res_base # Use the original base result for the first step
+    end
+
+    # --- STAGE 2: SETUP ---
+    last_res_ref = Ref(res_for_cache)
+    solver_state = Ref((
+        λ_S_init = 0.01, # Global starting value
+        λ_u_init = 0.01
+    ))
+
+    p = (
+        prim_base = prim_base,
+        res_base = res_base, # Keep the original base for creating new Primitives
+        target_moments = target_moments,
+        param_names = params_to_estimate,
+        last_res = last_res_ref,       # The starting point for the solver
+        solver_state = solver_state,   # The new λ cache
+        weighting_matrix = nothing,
+        matrix_moment_order = nothing
+    )
+
+    opt_func = OptimizationFunction(objective_function, ad_backend)
+
+    prob = OptimizationProblem(
+        opt_func,
+        initial_param_guess,
+        p;
+        lb = lower_bound,
+        ub = upper_bound
+    )
+
+    println("Estimation problem created successfully.")
+    return prob
 end
 
 

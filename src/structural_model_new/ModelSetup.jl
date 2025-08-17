@@ -281,21 +281,6 @@ function create_primitives_from_yaml(yaml_file::String)
     h_cdf     = cumsum(h_pdf)
     h_cdf /= h_cdf[end]                              # ensure exact 1.0
 
-    # Model functions (closures are type-stable because they capture concrete scalars)
-    production_fun = (h, ψ, α) -> (A₀ + A₁*h) * ((1 - α) + α * (ψ₀ * h^ϕ * ψ^ν))
-    utility_fun    = (w, α)    -> w - c₀ * (1 - α)^(χ + 1) / (χ + 1)
-    matching_fun   = (V, U)    -> γ₀ * U^γ₁ * V^(1 - γ₁)
-
-    p = Primitives(
-        A₀=A₀, A₁=A₁, ψ₀=ψ₀, ϕ=ϕ, ν=ν, c₀=c₀, χ=χ, γ₀=γ₀, γ₁=γ₁,
-        # production_fun=production_fun, utility_fun=utility_fun, matching_fun=matching_fun,
-        κ₀=κ₀, κ₁=κ₁, β=β, δ=δ, b=b, ξ=ξ,
-        n_ψ=n_ψ, ψ_min=ψ_min, ψ_max=ψ_max, ψ_grid=Vector{Float64}(ψ_grid),
-        ψ_pdf=Vector{Float64}(ψ_pdf), ψ_cdf=Vector{Float64}(ψ_cdf),
-        aₕ=aₕ, bₕ=bₕ, n_h=n_h, h_min=h_min, h_max=h_max,
-        h_grid=h_grid, h_pdf=h_pdf, h_cdf=h_cdf
-    )    
-
     # Assemble and validate
     return validated_Primitives(
         A₀=A₀, A₁=A₁, ψ₀=ψ₀, ϕ=ϕ, ν=ν, c₀=c₀, χ=χ, γ₀=γ₀, γ₁=γ₁,

@@ -17,11 +17,11 @@ ModelParameters:
   a_h: 2.0            # Beta distribution shape parameter a for skill
   b_h: 5.0            # Beta distribution shape parameter b for skill
 ModelGrids:
-  n_psi: 301          # Number of grid points for psi
-  n_ψ: 301            # Number of grid points for psi (duplicate for compatibility)
+  n_psi: 101          # Number of grid points for psi
+  n_ψ: 101            # Number of grid points for psi (duplicate for compatibility)
   psi_min: 0.0        # Minimum value for psi grid
   psi_max: 1.0        # Maximum value for psi grid
-  psi_data: /Users/mitchv34/Work/WFH/data/results/psi_distribution_Pre_COVID.csv  # Path to empirical psi data
+  psi_data: data/results/psi_distribution_Pre_COVID.csv  # Path to empirical psi data
   psi_column: psi     # Column name for psi in data file
   psi_weight: probability_mass  # Column name for weights in psi data file
   n_h: 100             # Number of grid points for skill (h)
