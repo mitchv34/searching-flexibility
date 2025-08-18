@@ -745,59 +745,95 @@ function objective_function(params, p)
 end
 
 
-function setup_estimation_problem(
-        prim_base, res_base, target_moments, params_to_estimate;
-        initial_param_guess,
-        use_warm_start::Bool=true,
-        ad_backend=AutoForwardDiff(),
-        lower_bound=nothing,
-        upper_bound=nothing
-    )
+"""
+    setup_estimation_problem(prim_base, res_base, target_moments, params_to_estimate;
+                             initial_param_guess,
+                             use_warm_start::Bool=true,
+                             ad_backend=AutoForwardDiff(),
+                             lower_bound=nothing,
+                             upper_bound=nothing,
+                             tol::Real=1e-7,
+                             max_iter::Integer=25_000,
+                             λ_S_init::Real=0.01,
+                             λ_u_init::Real=0.01,
+                             weighting_matrix=nothing,
+                             matrix_moment_order=nothing,
+                             burnin_kwargs=NamedTuple())
 
-    # --- STAGE 1: BURN-IN (if enabled) ---
-    res_for_cache = if use_warm_start
-        println("Performing burn-in solve to generate warm start...")
-        params_to_update = Dict(params_to_estimate .=> initial_param_guess)
-        
-        # Note: We create a copy of res_base to avoid mutating it
-        prim_initial, res_initial_cold = update_primitives_results(prim_base, deepcopy(res_base); params_to_update=params_to_update)
-        
-        solve_model(prim_initial, res_initial_cold, verbose=false)
-        res_initial_cold # This is our warm start
+Build an OptimizationProblem for estimation. Choose warm vs cold start via `use_warm_start`.
+
+- If `use_warm_start == true`, perform a burn-in solve at `initial_param_guess` to seed `last_res`.
+- Otherwise, use `res_base` as the initial state (cold start).
+"""
+function setup_estimation_problem(
+    prim_base, res_base, target_moments, params_to_estimate;
+    initial_param_guess,
+    use_warm_start::Bool=true,
+    ad_backend=AutoForwardDiff(),
+    lower_bound=nothing,
+    upper_bound=nothing,
+    tol::Real=1e-7,
+    max_iter::Integer=25_000,
+    λ_S_init::Real=0.01,
+    λ_u_init::Real=0.01,
+    weighting_matrix=nothing,
+    matrix_moment_order=nothing,
+    burnin_kwargs=NamedTuple()
+)
+    # --- Stage 1: optional burn-in to create a warm starting Results ---
+    res_for_cache = res_base
+    if use_warm_start
+        try
+            @info "setup_estimation_problem: warm start burn-in..."
+            params_dict = Dict(params_to_estimate .=> initial_param_guess)
+            prim_burn, res_burn = update_primitives_results(prim_base, deepcopy(res_base), params_dict)
+
+            # Merge user burn-in kwargs with defaults
+            burn_defaults = (verbose=false, tol=tol, max_iter=max_iter, λ_S_init=λ_S_init, λ_u_init=λ_u_init)
+            burn_opts = merge(burn_defaults, burnin_kwargs)
+            solve_model(prim_burn, res_burn;
+                        verbose=burn_opts.verbose, tol=burn_opts.tol, max_iter=burn_opts.max_iter,
+                        λ_S_init=burn_opts.λ_S_init, λ_u_init=burn_opts.λ_u_init)
+            res_for_cache = res_burn
+        catch e
+            @warn "Burn-in failed, falling back to cold start: $e"
+            res_for_cache = res_base
+        end
     else
-        println("Skipping burn-in. Using cold starts from res_base.")
-        res_base # Use the original base result for the first step
+        @info "setup_estimation_problem: cold start (no burn-in)"
     end
 
-    # --- STAGE 2: SETUP ---
+    # --- Stage 2: build problem context ---
     last_res_ref = Ref(res_for_cache)
-    solver_state = Ref((
-        λ_S_init = 0.01, # Global starting value
-        λ_u_init = 0.01
-    ))
+    solver_state = Ref((λ_S_init=λ_S_init, λ_u_init=λ_u_init))
 
     p = (
         prim_base = prim_base,
-        res_base = res_base, # Keep the original base for creating new Primitives
+        res_base = res_base,
         target_moments = target_moments,
         param_names = params_to_estimate,
-        last_res = last_res_ref,       # The starting point for the solver
-        solver_state = solver_state,   # The new λ cache
-        weighting_matrix = nothing,
-        matrix_moment_order = nothing
+        last_res = last_res_ref,         # enables warm starts in objective_function
+        solver_state = solver_state,     # rolling λ cache (updated in objective_function)
+        weighting_matrix = weighting_matrix,
+        matrix_moment_order = matrix_moment_order,
+        # pass-through solver controls used by objective_function via get(p, ...)
+        tol = tol,
+        max_iter = max_iter,
+        λ_S_init = λ_S_init,
+        λ_u_init = λ_u_init
     )
 
+    # Create OptimizationProblem (SciML) with chosen AD
     opt_func = OptimizationFunction(objective_function, ad_backend)
-
     prob = OptimizationProblem(
         opt_func,
-        initial_param_guess,
+        collect(initial_param_guess),
         p;
         lb = lower_bound,
         ub = upper_bound
     )
 
-    println("Estimation problem created successfully.")
+    @info "setup_estimation_problem: created (warm=$(use_warm_start)) with $(length(params_to_estimate)) parameter(s)"
     return prob
 end
 
