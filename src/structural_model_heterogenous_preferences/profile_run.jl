@@ -1,7 +1,7 @@
 # profile_run.jl — TimerOutputs-based profiling for heterogeneous preferences model
 
 using Pkg
-Pkg.activate(joinpath(@__DIR__, "."))
+Pkg.activate("../../..")
 Pkg.instantiate()
 
 using TimerOutputs

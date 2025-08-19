@@ -1,5 +1,4 @@
 using Pkg
-Pkg.activate(".")
 Pkg.instantiate()
 
 using Distributed
@@ -95,4 +94,47 @@ end
 
 display(fig)
 
+#!==========================================================================================
+#! EXPERIMENTS
+#!==========================================================================================
 
+# --- Diagnostic Test 1: Check s_flow ---
+println("--- Running Diagnostic Test 1: Verifying s_flow ---")
+
+# Create a primitive set with normal c₀
+prim_normal, res_normal = initializeModel(config)
+
+# Create a primitive set with extreme c₀
+# Use update_primitives_results to ensure all dependent fields are correct
+prim_extreme, res_extreme = update_primitives_results(prim_normal, res_normal, Dict(:c₀ => 100.0))
+
+@show prim_normal.c₀
+@show prim_extreme.c₀
+# Calculate s_flow for both cases
+s_flow_normal = calculate_expected_flow_surplus(prim_normal)
+s_flow_extreme = calculate_expected_flow_surplus(prim_extreme)
+
+# Check if they are different and print their means
+println("Are s_flow matrices different? ", !isapprox(s_flow_normal, s_flow_extreme))
+println("Mean of normal s_flow: ", mean(s_flow_normal))
+println("Mean of extreme s_flow: ", mean(s_flow_extreme))
+println("-"^50)
+
+# --- Diagnostic Test 2: Check Equilibrium Employment ---
+println("--- Running Diagnostic Test 2: Verifying Equilibrium ---")
+
+# Create and solve the normal case
+prim_normal, res_normal = initializeModel(config)
+solve_model(prim_normal, res_normal, verbose=false)
+
+# Create and solve the extreme case
+prim_extreme, res_extreme = update_primitives_results(prim_normal, res_normal, Dict(:c₀ => 100.0))
+solve_model(prim_extreme, res_extreme, verbose=false)
+
+# Check the total employment in both cases
+total_employment_normal = sum(res_normal.n)
+total_employment_extreme = sum(res_extreme.n)
+
+println("Total employment with normal c₀: ", total_employment_normal)
+println("Total employment with extreme c₀: ", total_employment_extreme)
+println("-"^50)

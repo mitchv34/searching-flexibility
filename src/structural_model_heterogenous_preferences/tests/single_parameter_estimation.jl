@@ -1,5 +1,5 @@
 using Pkg
-Pkg.activate(joinpath(@__DIR__, ".."))
+Pkg.activate("../../..")
 Pkg.instantiate()
 
 include(joinpath(@__DIR__, "..", "ModelSetup.jl"))

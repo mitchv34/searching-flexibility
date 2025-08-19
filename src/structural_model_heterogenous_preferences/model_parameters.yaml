@@ -3,11 +3,11 @@ ModelParameters:
   kappa1: 1.0
   beta: 0.996
   delta: 0.011
-  b: 0.7
+  b: 0.2
   xi: 0.5
   A0: 0.0
   A1: 1.62
-  psi_0: 1.05
+  psi_0: 0.5
   phi: 0.3
   nu: 1.5
   c0: 0.01
@@ -16,15 +16,14 @@ ModelParameters:
   gamma1: 0.5
   a_h: 2.0
   b_h: 5.0
-  k: 15.0
+  k: 5.0
 ModelGrids:
-  n_psi: 301
-  n_ψ: 301
+  n_psi: 50
   psi_min: 0.0
   psi_max: 1.0
-  psi_data: /Users/mitchv34/Work/WFH/data/results/psi_distribution_Pre_COVID.csv
+  psi_data: data/results/psi_distribution_Pre_COVID.csv
   psi_column: psi
   psi_weight: probability_mass
-  n_h: 100
+  n_h: 51
   h_min: 0.05
   h_max: 1.0

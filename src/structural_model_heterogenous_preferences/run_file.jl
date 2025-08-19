@@ -1,5 +1,5 @@
 using Pkg
-Pkg.activate(joinpath(@__DIR__, ".."))
+Pkg.activate("/project/high_tech_ind/searching-flexibility")
 Pkg.instantiate()
 
 # using Distributed
@@ -27,15 +27,15 @@ include(joinpath(ROOT, "ModelEstimation.jl"))
 
 config = "src/structural_model_heterogenous_preferences/model_parameters.yaml"
 prim, res = initializeModel(config);
-@time solve_model(prim, res, verbose=true, λ_S_init = 0.9, λ_u_init = 0.8, tol = 1e-8, max_iter = 25_000)
+@time solve_model(prim, res, verbose=true, λ_S_init = 0.01, λ_u_init = 0.01, tol = 1e-8, max_iter = 25_000)
 
-# Distribution plot moved to ModelPlotting.plot_z_distribution(prim)
+# Distribution plot moved toplot_z_distribution(prim)
 
-s_flow = calculate_expected_flow_surplus(prim);
+s_flow = calculate_expected_flow_surplus(prim)
 
 # Use plotting helpers in ModelPlotting for consistency
-fig_z = ModelPlotting.plot_z_distribution(prim)
-fig_s1, fig_s2, fig_s3, fig_s4 = ModelPlotting.plot_s_flow_diagnostics(s_flow, prim)
+fig_z =plot_z_distribution(prim)
+fig_s1, fig_s2, fig_s3, fig_s4 =plot_s_flow_diagnostics(s_flow, prim)
 
 # Display core diagnostics
 fig_z |> display
@@ -45,34 +45,30 @@ fig_s3 |> display
 fig_s4 |> display
 
 
-
-# new_prim, new_res = update_primitives_results(prim, res, Dict(:c₀ => prim.c₀ * 2));
-# @time solve_model(new_prim, new_res, verbose=true, λ_S_init = 0.05, λ_u_init = 0.05, tol = 1e-8, max_iter = 2000)
-
-
-
 # Solution diagnostics
 # # --- Generate diagnostic plots (integration with ModelPlotting) ---
 # # Employment distribution heatmap
-fig_emp = ModelPlotting.plot_employment_distribution(res, prim)
+fig_emp =plot_employment_distribution(res, prim)
 # # Employment distribution with marginals
-fig_emp_marg = ModelPlotting.plot_employment_distribution_with_marginals(res, prim)
+fig_emp_marg =plot_employment_distribution_with_marginals(res, prim)
 
-fig_surplus = ModelPlotting.plot_surplus_function(res, prim)
+fig_surplus = plot_surplus_function(res, prim)
 
-fig_alpha = ModelPlotting.plot_alpha_policy(res, prim)
+# fig_alpha =plot_alpha_policy(res, prim)
+fig_alpha = plot_avg_alpha(prim, res)
 
-fig_wage_pol = ModelPlotting.plot_wage_policy(res, prim)
+# fig_wage_pol =plot_wage_policy(res, prim)
+fig_wage_pol = plot_avg_wage(prim, res)
 
-fig_wage_amenity = ModelPlotting.plot_wage_amenity_tradeoff(res, prim)
+# fig_wage_amenity =plot_wage_amenity_tradeoff(res, prim)
 
-fig_outcome_skill = ModelPlotting.plot_outcomes_by_skill(res, prim)
+# fig_outcome_skill =plot_outcomes_by_skill(res, prim)
 
-# fig_work_arrangement = ModelPlotting.plot_work_arrangement_regimes(res, prim)
+# fig_work_arrangement =plot_work_arrangement_regimes(res, prim)
 
-# fig_work_arrangement_viable = ModelPlotting.plot_work_arrangement_regimes(res, prim, gray_nonviable=true)
+# fig_work_arrangement_viable =plot_work_arrangement_regimes(res, prim, gray_nonviable=true)
 
-# fig_alpha_by_firm = ModelPlotting.plot_alpha_policy_by_firm_type(res, prim)
+# fig_alpha_by_firm =plot_alpha_policy_by_firm_type(res, prim)
 
 save(joinpath(ROOT, "temp", "fig_z.png"), fig_z)
 save(joinpath(ROOT, "temp", "fig_s1.png"), fig_s1)

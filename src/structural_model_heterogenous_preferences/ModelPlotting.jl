@@ -6,10 +6,11 @@ Description: Contains all plotting functions for visualizing the random search
         distributions, surplus functions, policy functions, and various analyses.
 ==========================================================================================#
 
-module ModelPlotting
+# module ModelPlotting
 
 using CairoMakie, LaTeXStrings, StatsBase, Printf
 include(joinpath(@__DIR__, "ModelSetup.jl"))
+include(joinpath(@__DIR__, "ModelEstimation.jl"))
 using Roots
 using Dates
 
@@ -18,7 +19,7 @@ export plot_employment_distribution, plot_employment_distribution_with_marginals
        plot_wage_amenity_tradeoff, plot_outcomes_by_skill,
        plot_alpha_derivation_and_policy, plot_work_arrangement_regimes,
        plot_alpha_policy_by_firm_type, plot_z_distribution, plot_s_flow_diagnostics,
-       create_figure, create_axis
+       create_figure, create_axis, plot_avg_alpha, plot_avg_wage
 
 const COLORS = ["#0072B2", "#D55E00", "#009E73", "#F0E442"]
 const BACKGROUND_COLOR = "#FAFAFA"
@@ -114,10 +115,10 @@ function plot_s_flow_diagnostics(s_flow::AbstractMatrix, prim)
     ax3 = create_axis(fig3[1,1], "Slices: middle row & middle column", "index", "s_flow")
     lines!(ax3, ψ_vals, s_flow[mid_row, :], color=:red, label="row = $mid_row")
     lines!(ax3, h_vals, s_flow[:, mid_col], color=:blue, label="col = $mid_col")
-    axislegend(ax3)
+    axislegend(ax3, position = :rb)
 
     # Marginals
-    fig4 = create_figure(type="wide")
+    fig4 = create_figure(type="ultrawide")
     ax4a = create_axis(fig4[1,1], "Marginal over ψ (average across h)", "ψ", "mean s_flow")
     marg_x = vec(mean(s_flow, dims=1))
     lines!(ax4a, ψ_vals, marg_x, color=:steelblue, linewidth=2)
@@ -252,6 +253,43 @@ function plot_wage_policy(results, prim)
 end
 
 """
+    plot_avg_alpha(prim, res)
+
+Plot the expected (average) remote work share (avg_alpha) over the (h, ψ) grid.
+Requires: calculate_average_policies from ModelEstimation.jl.
+Returns a Figure.
+"""
+function plot_avg_alpha(prim, res)
+    avg_alpha, _, _ = calculate_average_policies(prim, res)
+    h_label = latexstring("Worker Skill (\$h\$)")
+    ψ_label = latexstring("Firm Remote Efficiency (\$\\psi\$)")
+    fig = create_figure()
+    ax = create_axis(fig[1, 1], latexstring("Expected Remote Work Share \$\\alpha^{*}(h, \\psi)\$"), h_label, ψ_label)
+    hmap = heatmap!(ax, prim.h_grid, prim.ψ_grid, avg_alpha', colormap = :coolwarm, colorrange = (0, 1))
+    Colorbar(fig[1, 2], hmap, label = "E[α]", ticks = 0:0.2:1)
+    return fig
+end
+
+"""
+    plot_avg_wage(prim, res)
+
+Plot the expected (average) wage (avg_wage) over the (h, ψ) grid.
+Requires: calculate_average_policies from ModelEstimation.jl.
+Returns a Figure.
+"""
+function plot_avg_wage(prim, res)
+    _, _, avg_wage = calculate_average_policies(prim, res)
+    h_label = latexstring("Worker Skill (\$h\$)")
+    ψ_label = latexstring("Firm Remote Efficiency (\$\\psi\$)")
+    fig = create_figure()
+    ax = create_axis(fig[1, 1], latexstring("Expected Wage \$w^{*}(h, \\psi) \$"), h_label, ψ_label)
+    hmap = heatmap!(ax, prim.h_grid, prim.ψ_grid, avg_wage', colormap = :viridis)
+    Colorbar(fig[1, 2], hmap, label = "E[w]")
+    return fig
+end
+
+
+"""
     plot_wage_amenity_tradeoff(results, prim)
 
 Plots the wage-amenity trade-off showing how wages change with remote work share
@@ -340,4 +378,4 @@ function plot_outcomes_by_skill(results, prim)
 end
 
 
-end # module ModelPlotting
+# end # module ModelPlotting

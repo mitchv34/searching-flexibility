@@ -89,7 +89,6 @@ end
 #?=========================================================================================
 #? Initialization and Helper Functions
 #?=========================================================================================
-
 # --- CHANGE: New core helper function with exponential g(h,ψ) ---
 # Given z, h, ψ, compute the analytical optimal α
 function optimal_alpha_given_z(prim::Primitives, h, ψ, z)
