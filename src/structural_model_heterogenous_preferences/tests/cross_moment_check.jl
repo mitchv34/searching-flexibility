@@ -1,12 +1,11 @@
 using Pkg
-# activate project containing Project.toml (adjust path if needed)
-Pkg.activate(joinpath(@__DIR__, ".."))
+Pkg.activate(".")
 Pkg.instantiate()
 
 using Distributed
 addprocs(9)  # add local workers after activating environment
 
-const ROOT = @__DIR__
+const ROOT = joinpath(@__DIR__, "..")
 @everywhere begin
     using Random, Statistics, SharedArrays, ForwardDiff
     using Optimization, OptimizationOptimJL, Optim
@@ -14,6 +13,7 @@ const ROOT = @__DIR__
     include(joinpath($ROOT, "ModelSolver.jl"))
     include(joinpath($ROOT, "ModelEstimation.jl"))
 end
+
 using Random, Statistics
 using Term
 using Printf
