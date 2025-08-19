@@ -610,3 +610,6 @@ TSWLatexianTemp*
 
 # Ignore repo-local conda env
 .conda/
+
+# Workspace file for local VS Code settings (do not commit)
+searching-flexibility.code-workspace
