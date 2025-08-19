@@ -1,13 +1,17 @@
+using Pkg
+Pkg.activate(".")
+Pkg.instantiate()
+
 using Distributed
 addprocs(9)
 
-const ROOT = @__DIR__
+const ROOT = joinpath(@__DIR__, "..")
 @everywhere begin
-    using Random, Statistics, SharedArrays, ForwardDiff
-    using Optimization, OptimizationOptimJL, Optim
-    include(joinpath($ROOT, "../ModelSetup.jl"))
-    include(joinpath($ROOT, "../ModelSolver.jl"))
-    include(joinpath($ROOT, "../ModelEstimation.jl"))
+        using Optimization, OptimizationOptimJL, Optim
+        using Random, Statistics, SharedArrays, ForwardDiff
+        include(joinpath($ROOT, "ModelSetup.jl"))
+        include(joinpath($ROOT, "ModelSolver.jl"))
+    include(joinpath($ROOT, "ModelEstimation.jl"))
 end
 
 using Random, Statistics
@@ -15,7 +19,7 @@ using Term, Printf
 using CairoMakie
 
 # Point to the heterogeneous model configuration file
-config = joinpath(@__DIR__, "..", "model_parameters.yaml")
+config = joinpath(ROOT, "model_parameters.yaml")
 # Initialize the model
 prim, res = initializeModel(config);
 # Solve the model
@@ -23,8 +27,7 @@ prim, res = initializeModel(config);
 # Compute baseline moments
 baseline_moments = compute_model_moments(prim, res)
 
-# Parameters to profile (pick a small set that matter)
-# params_to_estimate = [:c₀, :k, :χ, :A₁, :ν]
+# Parameters to profile 
 params_to_estimate = [:aₕ, :bₕ, :c₀, :k, :χ, :A₁, :ν, :ψ₀, :ϕ, :κ₀]
 initial_values = [getfield(prim, k) for k in params_to_estimate]
 
@@ -42,8 +45,8 @@ p = (
     # solver controls forwarded by objective_function
     tol = 1e-7,
     max_iter = 25_000,
-    λ_S_init = 0.1,
-    λ_u_init = 0.1
+    λ_S_init = 0.01,
+    λ_u_init = 0.01
 );
 
 # Settings for the grid around the true value
@@ -69,8 +72,6 @@ grids = [range(param * (1 - rel_width), param * (1 + rel_width), n_grid) for par
     return fvals
 end
 
-
-
 n_params = length(params_to_estimate)
 fvals_shared = SharedArray{Float64}(n_params, n_grid)
 fill!(fvals_shared, NaN)
@@ -93,22 +94,5 @@ for i in eachindex(params_to_estimate)
 end
 
 display(fig)
-
-
-
-
-
-# Sweep ν over a grid from 1 to 2 and plot objective values, marking the true value
-ν_index = findfirst(==(Symbol("ν")), params_to_estimate)
-ν_true = θ0[ν_index]
-ν_grid = range(1.0, 2.0, length=41)
-fvals_ν = [objective_function(setindex!(copy(θ0), ν, ν_index), p) for ν in ν_grid]
-
-fig_ν = Figure(size = (600, 400))
-ax_ν = Axis(fig_ν[1, 1], title = "Objective vs ν", xlabel = "ν", ylabel = "Objective")
-lines!(ax_ν, ν_grid, fvals_ν)
-vlines!(ax_ν, [ν_true], color = :red, linestyle = :dash, label = "True ν")
-axislegend(ax_ν)
-display(fig_ν)
 
 
