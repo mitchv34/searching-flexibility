@@ -1,10 +1,98 @@
 #==========================================================================================
 # Module: ModelSolver.jl
 # Description: Contains the core functions to solve for the steady-state equilibrium
-#              using the continuous logit model with an analytical solution.
+
 ===========================================================================================#
 
-using Parameters, Printf, Term, Distributions, ForwardDiff
+using Parameters, Printf, Term, Distributions, ForwardDiff, YAML
+#?=========================================================================================
+#? Solver Configuration
+#?=========================================================================================
+
+"""
+    SolverConfig
+
+Structure to hold solver configuration parameters.
+"""
+@with_kw struct SolverConfig{T<:Real}
+    tol::Float64 = 1e-8
+    max_iter::Int = 5000
+    verbose::Bool = true
+    print_freq::Int = 50
+    λ_S_init::Float64 = 0.01
+    λ_u_init::Float64 = 0.01
+    initial_S::Union{Matrix{T}, Nothing} = nothing
+end
+
+"""
+    load_solver_config_from_yaml(yaml_file::String; T::Type=Float64)
+
+Load solver configuration from YAML file. Returns a SolverConfig struct with
+values from the ModelSolverOptions section of the YAML file.
+
+# Arguments
+- `yaml_file::String`: Path to YAML configuration file
+- `T::Type`: Numeric type for matrices (default: Float64)
+
+# Returns
+- `SolverConfig{T}`: Configuration struct with solver options
+"""
+function load_solver_config_from_yaml(yaml_file::String; T::Type=Float64)
+    config = YAML.load_file(yaml_file, dicttype=Dict)
+    solver_opts = get(config, "ModelSolverOptions", Dict())
+    
+    # Helper function to get value with type conversion
+    function get_param(key::String, default_val, target_type::Type)
+        val = get(solver_opts, key, default_val)
+        if target_type == Float64 && isa(val, Number)
+            return Float64(val)
+        elseif target_type == Int && isa(val, Number)
+            return Int(val)
+        elseif target_type == Bool && isa(val, Bool)
+            return val
+        else
+            return default_val
+        end
+    end
+    
+    return SolverConfig{T}(
+        tol = get_param("tol", 1e-8, Float64),
+        max_iter = get_param("max_iter", 5000, Int),
+        verbose = get_param("verbose", true, Bool),
+        print_freq = get_param("print_freq", 50, Int),
+        λ_S_init = get_param("lambda_S_init", 0.01, Float64),
+        λ_u_init = get_param("lambda_u_init", 0.01, Float64),
+        initial_S = nothing  # Always start as nothing, can be overridden later
+    )
+end
+
+"""
+    merge_solver_config(base_config::SolverConfig{T}; kwargs...) where {T}
+
+Merge solver configuration with keyword arguments. Keyword arguments override
+values in base_config.
+
+# Arguments  
+- `base_config::SolverConfig{T}`: Base configuration
+- `kwargs...`: Keyword arguments to override
+
+# Returns
+- `SolverConfig{T}`: Merged configuration
+"""
+function merge_solver_config(base_config::SolverConfig{T}; kwargs...) where {T}
+    # Convert kwargs to a dictionary for easier access
+    kw_dict = Dict(kwargs)
+    
+    return SolverConfig{T}(
+        tol = get(kw_dict, :tol, base_config.tol),
+        max_iter = get(kw_dict, :max_iter, base_config.max_iter),
+        verbose = get(kw_dict, :verbose, base_config.verbose),
+        print_freq = get(kw_dict, :print_freq, base_config.print_freq),
+        λ_S_init = get(kw_dict, :λ_S_init, base_config.λ_S_init),
+        λ_u_init = get(kw_dict, :λ_u_init, base_config.λ_u_init),
+        initial_S = get(kw_dict, :initial_S, base_config.initial_S)
+    )
+end
 
 #?=========================================================================================
 #?=========================================================================================
@@ -72,7 +160,7 @@ function compute_final_outcomes!(prim::Primitives{T}, res::Results{T}) where {T<
     res.q = γ₀ * res.θ^(-γ₁)
     res.v = ((res.q .* B) ./ κ₀).^(1/κ₁)
     V = sum(res.v .* prim.ψ_pdf)
-    Γ = V > 0 ? (res.v .* prim.ψ_pdf) ./ V : zeros(T, n_ψ)
+    Γ = V > 0 ? (res.v .* prim.ψ_pdf) ./ V : zeros(T, prim.n_ψ)
     
     # Calculate final U(h) and n(h,ψ)
     exp_val_S = max.(0.0, res.S) * Γ
@@ -138,7 +226,7 @@ end
 #?=========================================================================================
 
 """
-    solve_model(prim, res; kwargs...)
+    solve_model(prim, res; config=nothing, kwargs...)
 
 **OFFICIAL SOLVER v2.0 (August 2025 Optimization)**
 
@@ -150,18 +238,58 @@ Replaced the original solver due to significant performance improvements:
 
 This version uses pre-allocated arrays and in-place operations throughout.
 For legacy version, see `solve_model_legacy()` below.
+
+# Arguments
+- `prim::Primitives{T}`: Model primitives
+- `res::Results{T}`: Results structure to update
+- `config::Union{SolverConfig, Nothing}`: Solver configuration (optional)
+- `kwargs...`: Individual parameters to override config (for backward compatibility)
+
+# Keyword Arguments (when config is not provided)
+- `initial_S::Union{Matrix{T}, Nothing}=nothing`: Initial surplus matrix
+- `tol::Float64=1e-8`: Convergence tolerance
+- `max_iter::Int=5000`: Maximum iterations
+- `verbose::Bool=true`: Print convergence information
+- `print_freq::Int=50`: Print frequency for verbose mode
+- `λ_S_init::Float64=0.01`: Initial dampening parameter for surplus
+- `λ_u_init::Float64=0.01`: Initial dampening parameter for unemployment
 """
 function solve_model(
                         prim::Primitives{T},
                         res::Results{T};
-                        initial_S::Union{Matrix{T}, Nothing}=nothing,
-                        tol::Float64=1e-8,
-                        max_iter::Int=5000,
-                        verbose::Bool=true,
-                        print_freq::Int=50,
-                        λ_S_init::Float64 = 0.01,
-                        λ_u_init::Float64 = 0.01
+                        config::Union{SolverConfig{T}, Nothing, String}=nothing,
+                        kwargs...
                     ) where {T<:Real}
+
+    # If config is provided, use it and only override with explicitly provided kwargs
+    if config !== nothing
+        # If a path is given then we extract the model parameters from the YAML file
+        if typeof(config) == String
+            config = load_solver_config_from_yaml(config)
+        end
+
+        # Only override config with explicitly provided kwargs (not defaults)
+        final_config = merge_solver_config(config; kwargs...)
+        
+        # Extract parameters from final config
+        initial_S = final_config.initial_S
+        tol = final_config.tol
+        max_iter = final_config.max_iter
+        verbose = final_config.verbose
+        print_freq = final_config.print_freq
+        λ_S_init = final_config.λ_S_init
+        λ_u_init = final_config.λ_u_init
+    else
+        # No config provided, use defaults and any provided kwargs
+        # Extract from kwargs with defaults as fallback
+        initial_S = get(kwargs, :initial_S, nothing)
+        tol = get(kwargs, :tol, 1e-8)
+        max_iter = get(kwargs, :max_iter, 5000)
+        verbose = get(kwargs, :verbose, true)
+        print_freq = get(kwargs, :print_freq, 50)
+        λ_S_init = get(kwargs, :λ_S_init, 0.01)
+        λ_u_init = get(kwargs, :λ_u_init, 0.01)
+    end
 
     @unpack h_grid, ψ_grid, β, δ, ξ, κ₀, κ₁, n_h, n_ψ, γ₀, γ₁ = prim
     f_h = prim.h_pdf
@@ -196,6 +324,8 @@ function solve_model(
     ΔS = Inf
     λ_S = λ_S_init
     λ_u = λ_u_init
+
+    status = :notConverged
 
     # Main iteration loop - fully optimized
     for k in 1:max_iter
@@ -291,6 +421,7 @@ function solve_model(
             if verbose
                 println("Converged after $k iterations.")
             end
+            status = :converged
             break
         end
     end
@@ -300,7 +431,7 @@ function solve_model(
     res.S .= S_final
     compute_final_outcomes!(prim, res)
     
-    return nothing
+    return status
 end
 
 #?=========================================================================================
@@ -310,7 +441,7 @@ end
 #?=========================================================================================
 
 """
-    solve_model_legacy(prim, res; kwargs...)
+    solve_model_legacy(prim, res; config=nothing, kwargs...)
 
 **LEGACY SOLVER v1.0 (Deprecated August 2025)**
 
@@ -323,18 +454,43 @@ Use `solve_model()` for production code. This function is kept for:
 - Compatibility with old code
 - Performance benchmarking
 - Reference implementation
+
+# Arguments
+- `prim::Primitives{T}`: Model primitives
+- `res::Results{T}`: Results structure to update
+- `config::Union{SolverConfig, Nothing}`: Solver configuration (optional)
+- `kwargs...`: Individual parameters to override config (for backward compatibility)
 """
 function solve_model_legacy(
                         prim::Primitives{T},
                         res::Results{T};
-                        initial_S::Union{Matrix{T}, Nothing}=nothing,
-                        tol::Float64=1e-8,
-                        max_iter::Int=5000,
-                        verbose::Bool=true,
-                        print_freq::Int=50,
-                        λ_S_init::Float64 = 0.01,
-                        λ_u_init::Float64 = 0.01
+                        config::Union{SolverConfig{T}, Nothing}=nothing,
+                        kwargs...
                     ) where {T<:Real}
+
+    # If config is provided, use it and only override with explicitly provided kwargs
+    if config !== nothing
+        # Override config with explicitly provided kwargs (not defaults)
+        final_config = merge_solver_config(config; kwargs...)
+        
+        # Extract parameters from final config
+        initial_S = final_config.initial_S
+        tol = final_config.tol
+        max_iter = final_config.max_iter
+        verbose = final_config.verbose
+        print_freq = final_config.print_freq
+        λ_S_init = final_config.λ_S_init
+        λ_u_init = final_config.λ_u_init
+    else
+        # No config provided, use defaults and any provided kwargs
+        initial_S = get(kwargs, :initial_S, nothing)
+        tol = get(kwargs, :tol, 1e-8)
+        max_iter = get(kwargs, :max_iter, 5000)
+        verbose = get(kwargs, :verbose, true)
+        print_freq = get(kwargs, :print_freq, 50)
+        λ_S_init = get(kwargs, :λ_S_init, 0.01)
+        λ_u_init = get(kwargs, :λ_u_init, 0.01)
+    end
 
     @unpack h_grid, ψ_grid, β, δ, ξ, κ₀, κ₁, n_h, n_ψ, γ₀, γ₁ = prim
     f_h = copy(prim.h_pdf)
@@ -377,7 +533,7 @@ function solve_model_legacy(
 
         v = ((q .* B) ./ κ₀).^(1/κ₁)
         V = sum(v .* f_ψ)
-        Γ = V > 0 ? (v .* f_ψ) ./ V : zeros(T, n_ψ)
+        Γ = V > 0 ? (v .* f_ψ) ./ V : zeros(T, prim.n_ψ)
 
         ExpectedSearch = max.(0.0, S_old) * Γ
         S_update = (s_flow .- (β * p * ξ .* ExpectedSearch)) ./ denom
@@ -401,4 +557,251 @@ function solve_model_legacy(
 
     compute_final_outcomes!(prim, res)
     return
+end
+
+#?=========================================================================================
+#? EXPERIMENTAL SOLVER (v3.0 - Dynamic Relaxation, August 2025)
+#? Features adaptive damping and improved convergence monitoring
+#?=========================================================================================
+
+"""
+    calculate_B!(B, S_old, u_dist, ξ)
+
+In-place calculation of B vector to minimize allocations.
+"""
+function calculate_B!(B::Vector{T}, S_old::Matrix{T}, u_dist::Vector{T}, ξ::T) where {T<:Real}
+    n_h, n_ψ = size(S_old)
+    fill!(B, 0.0)
+    one_minus_ξ = 1.0 - ξ
+    for j in 1:n_ψ
+        for i in 1:n_h
+            B[j] += one_minus_ξ * max(0.0, S_old[i, j]) * u_dist[i]
+        end
+    end
+    return nothing
+end
+
+"""
+    calculate_Gamma!(Γ, v, f_ψ)
+
+In-place calculation of Γ vector to minimize allocations.
+"""
+function calculate_Gamma!(Γ::Vector{T}, v::Vector{T}, f_ψ::Vector{T}) where {T<:Real}
+    V = 0.0
+    for j in eachindex(v)
+        V += v[j] * f_ψ[j]
+    end
+    
+    if V > 0
+        inv_V = 1.0 / V
+        @. Γ = (v * f_ψ) * inv_V
+    else
+        fill!(Γ, 0.0)
+    end
+    return nothing
+end
+
+"""
+    solve_model_adaptive(prim, res; config=nothing, kwargs...)
+
+**EXPERIMENTAL SOLVER v3.0 (Dynamic Relaxation, August 2025)**
+
+Enhanced solver with adaptive damping parameters and improved convergence monitoring.
+Features:
+- Dynamic relaxation parameter adjustment
+- Convergence status reporting
+- Automatic step size reduction when convergence stalls
+- Enhanced progress monitoring
+- Full config compatibility with main solver
+
+# Arguments
+- `prim::Primitives{T}`: Model primitives
+- `res::Results{T}`: Results structure to update
+- `config::Union{SolverConfig, Nothing, String}`: Solver configuration (optional)
+- `kwargs...`: Individual parameters to override config (for backward compatibility)
+
+# Keyword Arguments (when config is not provided)
+- `initial_S::Union{Matrix{T}, Nothing}=nothing`: Initial surplus matrix
+- `tol::Float64=1e-8`: Convergence tolerance
+- `max_iter::Int=5000`: Maximum iterations
+- `verbose::Bool=true`: Print convergence information
+- `print_freq::Int=50`: Print frequency for verbose mode
+- `λ_S_init::Float64=0.01`: Initial dampening parameter for surplus
+- `λ_u_init::Float64=0.01`: Initial dampening parameter for unemployment
+
+# Returns
+- `status::Symbol`: Convergence status (:converged, :max_iter_reached, :in_progress)
+- `λ_S::Float64`: Final surplus damping parameter
+- `λ_u::Float64`: Final unemployment damping parameter
+"""
+function solve_model_adaptive(
+                        prim::Primitives{T},
+                        res::Results{T};
+                        config::Union{SolverConfig{T}, Nothing, String}=nothing,
+                        kwargs...
+                    ) where {T<:Real}
+
+    # If config is provided, use it and only override with explicitly provided kwargs
+    if config !== nothing
+        # If a path is given then we extract the model parameters from the YAML file
+        if typeof(config) == String
+            config = load_solver_config_from_yaml(config)
+        end
+
+        # Only override config with explicitly provided kwargs (not defaults)
+        final_config = merge_solver_config(config; kwargs...)
+        
+        # Extract parameters from final config
+        initial_S = final_config.initial_S
+        tol = final_config.tol
+        max_iter = final_config.max_iter
+        verbose = final_config.verbose
+        print_freq = final_config.print_freq
+        λ_S_init = final_config.λ_S_init
+        λ_u_init = final_config.λ_u_init
+    else
+        # No config provided, use defaults and any provided kwargs
+        # Extract from kwargs with defaults as fallback
+        initial_S = get(kwargs, :initial_S, nothing)
+        tol = get(kwargs, :tol, 1e-8)
+        max_iter = get(kwargs, :max_iter, 5000)
+        verbose = get(kwargs, :verbose, true)
+        print_freq = get(kwargs, :print_freq, 50)
+        λ_S_init = get(kwargs, :λ_S_init, 0.01)
+        λ_u_init = get(kwargs, :λ_u_init, 0.01)
+    end
+
+    @unpack h_grid, ψ_grid, β, δ, ξ, κ₀, κ₁, n_h, n_ψ, γ₀, γ₁ = prim
+    f_h = prim.h_pdf
+    f_ψ = prim.ψ_pdf
+
+    s_flow = calculate_logit_flow_surplus_with_curvature(prim)
+
+    S_final = isnothing(initial_S) ? copy(s_flow) : copy(initial_S)
+    u_final = copy(prim.h_pdf)
+    
+    # Pre-allocate all temporary arrays to minimize allocations
+    S_old = similar(S_final)
+    u_old = similar(u_final)
+    u_dist = similar(u_final)
+    B = Vector{T}(undef, n_ψ)
+    v = Vector{T}(undef, n_ψ)
+    Γ = Vector{T}(undef, n_ψ)
+    ExpectedSearch = Vector{T}(undef, n_h)
+    S_update = similar(S_final)
+    ProbAccept = Vector{T}(undef, n_h)
+    unemp_rate = Vector{T}(undef, n_h)
+    u_update = similar(u_final)
+    S_diff = similar(S_final) # For non-allocating distance calculation
+
+    denom = 1.0 - β * (1.0 - δ)
+    inv_κ₁ = 1.0 / κ₁
+    ΔS = Inf
+    ΔS_prev = Inf
+
+    # --- NEW: Dynamic Relaxation and Convergence Status ---
+    λ_S = λ_S_init
+    λ_u = λ_u_init
+    status::Symbol = :in_progress
+    max_retries = 5 # Max times to shrink lambda before giving up
+
+    for k in 1:max_iter
+        copy!(S_old, S_final)
+        copy!(u_old, u_final)
+
+        # --- Part 1: Update aggregates and surplus (In-place) ---
+        L = sum(u_old)
+        @. u_dist = u_old / L
+        
+        # Use optimized in-place calculations
+        calculate_B!(B, S_old, u_dist, ξ)
+        B_integral = 0.0
+        for j in 1:n_ψ
+            B_integral += max(0.0, B[j])^inv_κ₁ * f_ψ[j]
+        end
+        
+        θ = ((1/L) * (γ₀/κ₀)^inv_κ₁ * B_integral)^(1 / (1 + γ₁*inv_κ₁))
+        p = γ₀ * θ^(1 - γ₁)
+        q = γ₀ * θ^(-γ₁)
+        
+        @. v = ((q * B) / κ₀)^inv_κ₁
+        calculate_Gamma!(Γ, v, f_ψ)
+        
+        # ExpectedSearch calculation (in-place matrix-vector multiply)
+        fill!(ExpectedSearch, 0.0)
+        for i in 1:n_h
+            for j in 1:n_ψ
+                val = max(0.0, S_old[i, j])
+                if val > 0.0
+                    ExpectedSearch[i] += val * Γ[j]
+                end
+            end
+        end
+        
+        βpξ = β * p * ξ
+        @. S_update = (s_flow - βpξ * ExpectedSearch) / denom
+        @. S_final = (1.0 - λ_S) * S_old + λ_S * S_update
+
+        # --- Part 2: Update unemployment (In-place) ---
+        fill!(ProbAccept, 0.0)
+        for i in 1:n_h
+            for j in 1:n_ψ
+                if S_final[i, j] > 0.0
+                    ProbAccept[i] += Γ[j]
+                end
+            end
+        end
+        
+        @. unemp_rate = δ / (δ + p * ProbAccept)
+        @. u_update = unemp_rate * f_h
+        @. u_final = (1.0 - λ_u) * u_old + λ_u * u_update
+
+        # --- Part 3: Check for Convergence ---
+        @. S_diff = abs(S_final - S_old)
+        ΔS = maximum(S_diff)
+
+        # --- NEW: Dynamic Relaxation Logic ---
+        if ΔS > ΔS_prev && k > 10 && max_retries > 0
+            # If error increased, the step was too big.
+            # Revert, shrink lambda, and retry this iteration.
+            copy!(S_final, S_old) # Revert S
+            copy!(u_final, u_old) # Revert u
+            λ_S = max(λ_S / 2.0, 1e-4) # Shrink lambda
+            λ_u = max(λ_u / 2.0, 1e-4) # Shrink lambda for unemployment too
+            ΔS = ΔS_prev # Reset error
+            max_retries -= 1
+            if verbose
+                @printf("Step too large at iter %d, reducing λ_S to %.6f\n", k, λ_S)
+            end
+            continue # Redo this iteration with smaller lambda
+        end
+        ΔS_prev = ΔS
+
+        if verbose && (k % print_freq == 0 || k == 1)
+            @printf("Iter %4d: ΔS = %.12e, λ_S = %.4f\n", k, ΔS, λ_S)
+        end
+        
+        if ΔS < tol
+            status = :converged
+            if verbose
+                println("Converged after $k iterations.")
+            end
+            break
+        end
+    end
+
+    if status == :in_progress
+        status = :max_iter_reached
+        if verbose
+            @warn "Solver stopped after reaching max_iter=$max_iter. Final ΔS = $ΔS"
+        end
+    end
+
+    # Update final results (in-place)
+    res.u .= u_final
+    res.S .= S_final
+    compute_final_outcomes!(prim, res)
+    
+    # --- NEW: Return status, final lambdas and convergence error -- 
+    return status, λ_S, λ_u, ΔS
 end
