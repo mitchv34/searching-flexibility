@@ -1,10 +1,10 @@
 name: searching-flexibility
 channels:
-  - https://repo.anaconda.com/pkgs/main
-  - https://repo.anaconda.com/pkgs/r
+  - conda-forge
+  - defaults
 dependencies:
   - python=3.12.9
   - pandas
   - requests
   - numpy
-prefix: /Users/mitchv34/miniconda3/envs/searching-flexibility
+  - pandas-datareader
