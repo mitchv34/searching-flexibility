@@ -1,0 +1,1556 @@
+{
+    "aₕ, bₕ, c₀": {
+        "PerturbMode": "fixed",
+        "Status": "IN_PROGRESS",
+        "WarmStart": true
+    },
+    "aₕ, bₕ, κ₀": {
+        "AbsError": [
+            0.009567688999127633,
+            0.01349295725949684,
+            0.00530050270655269
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.0095676889991276,
+            5.013492957259497,
+            1.0053005027065527
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 102,
+        "InitialGuess": [
+            2.6,
+            6.5,
+            1.3
+        ],
+        "Iterations": 52,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 48.715,
+        "Value": [
+            2.0,
+            5.0,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "aₕ, bₕ, ν": {
+        "PerturbMode": "fixed",
+        "Status": "IN_PROGRESS",
+        "WarmStart": true
+    },
+    "aₕ, bₕ, ϕ": {
+        "PerturbMode": "fixed",
+        "Status": "IN_PROGRESS",
+        "WarmStart": true
+    },
+    "aₕ, bₕ, χ": {
+        "PerturbMode": "fixed",
+        "Status": "IN_PROGRESS",
+        "WarmStart": true
+    },
+    "aₕ, bₕ, ψ₀": {
+        "PerturbMode": "fixed",
+        "Status": "IN_PROGRESS",
+        "WarmStart": true
+    },
+    "aₕ, c₀, κ₀": {
+        "AbsError": [
+            0.04345332822022474,
+            0.002382681269812975,
+            0.551437221112344
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.0434533282202247,
+            0.202382681269813,
+            1.551437221112344
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 117,
+        "InitialGuess": [
+            2.6,
+            0.26,
+            1.3
+        ],
+        "Iterations": 63,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 28.503,
+        "Value": [
+            2.0,
+            0.2,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "aₕ, c₀, ν": {
+        "PerturbMode": "fixed",
+        "Status": "IN_PROGRESS",
+        "WarmStart": true
+    },
+    "aₕ, c₀, ϕ": {
+        "AbsError": [
+            0.9999108279933653,
+            0.0922333493413881,
+            0.12722730057614473
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            1.0000891720066347,
+            0.2922333493413881,
+            0.4272273005761447
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 169,
+        "InitialGuess": [
+            2.6,
+            0.26,
+            0.39
+        ],
+        "Iterations": 90,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 32.777,
+        "Value": [
+            2.0,
+            0.2,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "aₕ, c₀, χ": {
+        "PerturbMode": "fixed",
+        "Status": "IN_PROGRESS",
+        "WarmStart": true
+    },
+    "aₕ, c₀, ψ₀": {
+        "AbsError": [
+            0.8058969863904668,
+            0.013131058360365294,
+            0.03029274755301481
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.805896986390467,
+            0.2131310583603653,
+            1.0197072524469852
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 301,
+        "InitialGuess": [
+            2.6,
+            0.26,
+            1.3650000000000002
+        ],
+        "Iterations": 139,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 73.403,
+        "Value": [
+            2.0,
+            0.2,
+            1.05
+        ],
+        "WarmStart": true
+    },
+    "aₕ, ν, κ₀": {
+        "AbsError": [
+            0.26456736286978266,
+            0.03280128199445098,
+            0.8407248548659734
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.2645673628697827,
+            1.032801281994451,
+            1.8407248548659734
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 145,
+        "InitialGuess": [
+            2.6,
+            1.3,
+            1.3
+        ],
+        "Iterations": 73,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 31.062,
+        "Value": [
+            2.0,
+            1.0,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "aₕ, ν, ϕ": {
+        "AbsError": [
+            0.030655132631387527,
+            0.053349335533590114,
+            0.0087750791515106
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.0306551326313875,
+            1.0533493355335901,
+            0.3087750791515106
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 415,
+        "InitialGuess": [
+            2.6,
+            1.3,
+            0.39
+        ],
+        "Iterations": 218,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 88.824,
+        "Value": [
+            2.0,
+            1.0,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "aₕ, ν, ψ₀": {
+        "AbsError": [
+            2.707619581525302,
+            0.12107918862054479,
+            0.04710375246646503
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            4.707619581525302,
+            0.8789208113794552,
+            1.002896247533535
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 226,
+        "InitialGuess": [
+            2.6,
+            1.3,
+            1.3650000000000002
+        ],
+        "Iterations": 116,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 71.459,
+        "Value": [
+            2.0,
+            1.0,
+            1.05
+        ],
+        "WarmStart": true
+    },
+    "aₕ, ϕ, κ₀": {
+        "AbsError": [
+            0.06531623657493846,
+            0.0072968279839806804,
+            0.8278801412961116
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.0653162365749385,
+            0.2927031720160193,
+            1.8278801412961116
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 160,
+        "InitialGuess": [
+            2.6,
+            0.39,
+            1.3
+        ],
+        "Iterations": 78,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 37.568,
+        "Value": [
+            2.0,
+            0.3,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "aₕ, χ, κ₀": {
+        "AbsError": [
+            0.0645912888186162,
+            0.049923206843913714,
+            0.8557710231209965
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.064591288818616,
+            1.9500767931560863,
+            1.8557710231209965
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 157,
+        "InitialGuess": [
+            2.6,
+            2.6,
+            1.3
+        ],
+        "Iterations": 79,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 34.268,
+        "Value": [
+            2.0,
+            2.0,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "aₕ, χ, ν": {
+        "AbsError": [
+            0.37760963020495764,
+            0.6164402098370294,
+            0.5684253332046543
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.3776096302049576,
+            2.6164402098370294,
+            1.5684253332046543
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 229,
+        "InitialGuess": [
+            2.6,
+            2.6,
+            1.3
+        ],
+        "Iterations": 109,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 56.156,
+        "Value": [
+            2.0,
+            2.0,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "aₕ, χ, ϕ": {
+        "AbsError": [
+            0.018358833927521356,
+            0.1795511616920833,
+            0.024265684439011892
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            1.9816411660724786,
+            2.1795511616920833,
+            0.2757343155609881
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 255,
+        "InitialGuess": [
+            2.6,
+            2.6,
+            0.39
+        ],
+        "Iterations": 136,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 58.635,
+        "Value": [
+            2.0,
+            2.0,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "aₕ, χ, ψ₀": {
+        "AbsError": [
+            0.3597828761198181,
+            1.7890233850424555,
+            0.09205439875219956
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.359782876119818,
+            3.7890233850424555,
+            1.1420543987521996
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 201,
+        "InitialGuess": [
+            2.6,
+            2.6,
+            1.3650000000000002
+        ],
+        "Iterations": 97,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 46.961,
+        "Value": [
+            2.0,
+            2.0,
+            1.05
+        ],
+        "WarmStart": true
+    },
+    "aₕ, ψ₀, κ₀": {
+        "AbsError": [
+            0.013987280715119343,
+            0.010653240586033563,
+            1.2135835602144125
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.0139872807151193,
+            1.0606532405860336,
+            2.2135835602144125
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 157,
+        "InitialGuess": [
+            2.6,
+            1.3650000000000002,
+            1.3
+        ],
+        "Iterations": 77,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 35.603,
+        "Value": [
+            2.0,
+            1.05,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "aₕ, ψ₀, ϕ": {
+        "AbsError": [
+            0.5476068701798642,
+            0.29941031539747476,
+            0.37359910792082557
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.547606870179864,
+            1.3494103153974748,
+            0.6735991079208256
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 249,
+        "InitialGuess": [
+            2.6,
+            1.3650000000000002,
+            0.39
+        ],
+        "Iterations": 126,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 57.778,
+        "Value": [
+            2.0,
+            1.05,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "bₕ, c₀, κ₀": {
+        "AbsError": [
+            0.1691238481898898,
+            0.00602586690752524,
+            0.7479365105334019
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            5.16912384818989,
+            0.20602586690752525,
+            1.747936510533402
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 112,
+        "InitialGuess": [
+            6.5,
+            0.26,
+            1.3
+        ],
+        "Iterations": 60,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 26.638,
+        "Value": [
+            5.0,
+            0.2,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "bₕ, c₀, ν": {
+        "AbsError": [
+            5.289931177886217,
+            0.02272753356123311,
+            0.16756978487422813
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            10.289931177886217,
+            0.22272753356123312,
+            0.8324302151257719
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 183,
+        "InitialGuess": [
+            6.5,
+            0.26,
+            1.3
+        ],
+        "Iterations": 92,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 55.202,
+        "Value": [
+            5.0,
+            0.2,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "bₕ, c₀, ϕ": {
+        "AbsError": [
+            2.4104983495176926,
+            0.06111269429349331,
+            0.08884463429541073
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            7.410498349517693,
+            0.2611126942934933,
+            0.3888446342954107
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 133,
+        "InitialGuess": [
+            6.5,
+            0.26,
+            0.39
+        ],
+        "Iterations": 69,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 29.941,
+        "Value": [
+            5.0,
+            0.2,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "bₕ, c₀, χ": {
+        "AbsError": [
+            1.3567904818650005,
+            0.03232449057683945,
+            0.29302389238933824
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            6.3567904818650005,
+            0.23232449057683946,
+            2.2930238923893382
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 302,
+        "InitialGuess": [
+            6.5,
+            0.26,
+            2.6
+        ],
+        "Iterations": 156,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 70.403,
+        "Value": [
+            5.0,
+            0.2,
+            2.0
+        ],
+        "WarmStart": true
+    },
+    "bₕ, c₀, ψ₀": {
+        "AbsError": [
+            3.213860715443685,
+            0.09356265949259318,
+            0.13273596725400127
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            8.213860715443685,
+            0.2935626594925932,
+            0.9172640327459988
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 224,
+        "InitialGuess": [
+            6.5,
+            0.26,
+            1.3650000000000002
+        ],
+        "Iterations": 113,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 53.172,
+        "Value": [
+            5.0,
+            0.2,
+            1.05
+        ],
+        "WarmStart": true
+    },
+    "bₕ, ν, κ₀": {
+        "AbsError": [
+            0.03992741400424826,
+            0.01958249731665518,
+            0.2808956861249119
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            4.960072585995752,
+            1.0195824973166552,
+            1.280895686124912
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 125,
+        "InitialGuess": [
+            6.5,
+            1.3,
+            1.3
+        ],
+        "Iterations": 68,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 27.124,
+        "Value": [
+            5.0,
+            1.0,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "bₕ, ν, ϕ": {
+        "AbsError": [
+            0.0008734088791957362,
+            0.001407903386694942,
+            0.000184611489481179
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            5.000873408879196,
+            1.001407903386695,
+            0.30018461148948117
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 172,
+        "InitialGuess": [
+            6.5,
+            1.3,
+            0.39
+        ],
+        "Iterations": 93,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 37.808,
+        "Value": [
+            5.0,
+            1.0,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "bₕ, ν, ψ₀": {
+        "AbsError": [
+            0.4177139601221116,
+            0.14132264423150942,
+            0.025747948053109315
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            5.417713960122112,
+            1.1413226442315094,
+            1.0242520519468907
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 201,
+        "InitialGuess": [
+            6.5,
+            1.3,
+            1.3650000000000002
+        ],
+        "Iterations": 100,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 59.982,
+        "Value": [
+            5.0,
+            1.0,
+            1.05
+        ],
+        "WarmStart": true
+    },
+    "bₕ, ϕ, κ₀": {
+        "AbsError": [
+            0.036470176865146975,
+            0.001988977541955872,
+            0.19690193031994419
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            4.963529823134853,
+            0.2980110224580441,
+            1.1969019303199442
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 135,
+        "InitialGuess": [
+            6.5,
+            0.39,
+            1.3
+        ],
+        "Iterations": 67,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 32.423,
+        "Value": [
+            5.0,
+            0.3,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "bₕ, χ, κ₀": {
+        "AbsError": [
+            0.0510532268506223,
+            0.027960212396432205,
+            0.4092017948644009
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            4.948946773149378,
+            1.9720397876035678,
+            1.409201794864401
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 172,
+        "InitialGuess": [
+            6.5,
+            2.6,
+            1.3
+        ],
+        "Iterations": 93,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 39.249,
+        "Value": [
+            5.0,
+            2.0,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "bₕ, χ, ν": {
+        "AbsError": [
+            0.0007505356727790513,
+            0.0023016975449181576,
+            0.001814442646341341
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            4.999249464327221,
+            1.9976983024550818,
+            0.9981855573536587
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 231,
+        "InitialGuess": [
+            6.5,
+            2.6,
+            1.3
+        ],
+        "Iterations": 128,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 55.16,
+        "Value": [
+            5.0,
+            2.0,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "bₕ, χ, ϕ": {
+        "AbsError": [
+            0.07653721830749571,
+            0.21462868835748194,
+            0.027828714155598178
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            5.076537218307496,
+            2.214628688357482,
+            0.2721712858444018
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 141,
+        "InitialGuess": [
+            6.5,
+            2.6,
+            0.39
+        ],
+        "Iterations": 70,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 30.828,
+        "Value": [
+            5.0,
+            2.0,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "bₕ, χ, ψ₀": {
+        "AbsError": [
+            4.1051411166107705,
+            1.2848046275981653,
+            0.16462203155902633
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            9.10514111661077,
+            3.2848046275981653,
+            1.2146220315590264
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 192,
+        "InitialGuess": [
+            6.5,
+            2.6,
+            1.3650000000000002
+        ],
+        "Iterations": 87,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 46.027,
+        "Value": [
+            5.0,
+            2.0,
+            1.05
+        ],
+        "WarmStart": true
+    },
+    "bₕ, ψ₀, κ₀": {
+        "AbsError": [
+            0.060748169322311085,
+            0.001263827632863812,
+            0.07957875797686453
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            4.939251830677689,
+            1.0512638276328639,
+            1.0795787579768645
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 238,
+        "InitialGuess": [
+            6.5,
+            1.3650000000000002,
+            1.3
+        ],
+        "Iterations": 116,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 58.589,
+        "Value": [
+            5.0,
+            1.05,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "bₕ, ψ₀, ϕ": {
+        "AbsError": [
+            0.03531514778715028,
+            0.16917857005378778,
+            0.16760842870098575
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            4.96468485221285,
+            1.2191785700537878,
+            0.46760842870098573
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 282,
+        "InitialGuess": [
+            6.5,
+            1.3650000000000002,
+            0.39
+        ],
+        "Iterations": 146,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 74.631,
+        "Value": [
+            5.0,
+            1.05,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "c₀, ν, κ₀": {
+        "AbsError": [
+            0.003525745527394486,
+            0.009215184394105624,
+            0.5879146457447475
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            0.2035257455273945,
+            0.9907848156058944,
+            1.5879146457447475
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 156,
+        "InitialGuess": [
+            0.26,
+            1.3,
+            1.3
+        ],
+        "Iterations": 79,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 35.694,
+        "Value": [
+            0.2,
+            1.0,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "c₀, ν, ϕ": {
+        "AbsError": [
+            0.04608914588208343,
+            0.5109857727357934,
+            0.15073778499613982
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            0.24608914588208344,
+            1.5109857727357934,
+            0.4507377849961398
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 125,
+        "InitialGuess": [
+            0.26,
+            1.3,
+            0.39
+        ],
+        "Iterations": 62,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 29.283,
+        "Value": [
+            0.2,
+            1.0,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "c₀, ν, ψ₀": {
+        "AbsError": [
+            0.17186315461603802,
+            0.8064751414547005,
+            0.9020259720533028
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            0.371863154616038,
+            0.19352485854529955,
+            1.9520259720533029
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 171,
+        "InitialGuess": [
+            0.26,
+            1.3,
+            1.3650000000000002
+        ],
+        "Iterations": 88,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 69.215,
+        "Value": [
+            0.2,
+            1.0,
+            1.05
+        ],
+        "WarmStart": true
+    },
+    "c₀, ϕ, κ₀": {
+        "AbsError": [
+            0.02297009078860232,
+            0.03425219985147726,
+            0.20559570226162938
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            0.22297009078860233,
+            0.33425219985147725,
+            0.7944042977383706
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 162,
+        "InitialGuess": [
+            0.26,
+            0.39,
+            1.3
+        ],
+        "Iterations": 78,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 38.876,
+        "Value": [
+            0.2,
+            0.3,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "c₀, χ, κ₀": {
+        "AbsError": [
+            0.05254550622291809,
+            0.34748344558083133,
+            2.676853698775923
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            0.2525455062229181,
+            2.3474834455808313,
+            3.676853698775923
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 347,
+        "InitialGuess": [
+            0.26,
+            2.6,
+            1.3
+        ],
+        "Iterations": 189,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 76.74,
+        "Value": [
+            0.2,
+            2.0,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "c₀, χ, ν": {
+        "AbsError": [
+            0.040265230107568245,
+            0.9244571692862467,
+            0.5247791502454089
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            0.24026523010756826,
+            2.9244571692862467,
+            1.5247791502454089
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 137,
+        "InitialGuess": [
+            0.26,
+            2.6,
+            1.3
+        ],
+        "Iterations": 64,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 33.311,
+        "Value": [
+            0.2,
+            2.0,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "c₀, χ, ϕ": {
+        "AbsError": [
+            0.10909146060294628,
+            1.2521098692525938,
+            0.013619254694580973
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            0.3090914606029463,
+            3.252109869252594,
+            0.286380745305419
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 244,
+        "InitialGuess": [
+            0.26,
+            2.6,
+            0.39
+        ],
+        "Iterations": 119,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 54.9,
+        "Value": [
+            0.2,
+            2.0,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "c₀, χ, ψ₀": {
+        "AbsError": [
+            0.08343808929416419,
+            1.1504237839730416,
+            0.020278015127615623
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            0.2834380892941642,
+            3.1504237839730416,
+            1.0702780151276157
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 241,
+        "InitialGuess": [
+            0.26,
+            2.6,
+            1.3650000000000002
+        ],
+        "Iterations": 121,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 57.729,
+        "Value": [
+            0.2,
+            2.0,
+            1.05
+        ],
+        "WarmStart": true
+    },
+    "c₀, ψ₀, κ₀": {
+        "AbsError": [
+            0.008007173556634162,
+            0.00430912891030788,
+            0.7076544424740743
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            0.20800717355663417,
+            1.0456908710896922,
+            1.7076544424740743
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 113,
+        "InitialGuess": [
+            0.26,
+            1.3650000000000002,
+            1.3
+        ],
+        "Iterations": 53,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 25.921,
+        "Value": [
+            0.2,
+            1.05,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "c₀, ψ₀, ϕ": {
+        "AbsError": [
+            0.06869144651049647,
+            0.0933527851810163,
+            0.23749261069300337
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            0.2686914465104965,
+            1.1433527851810164,
+            0.5374926106930034
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 240,
+        "InitialGuess": [
+            0.26,
+            1.3650000000000002,
+            0.39
+        ],
+        "Iterations": 123,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 67.648,
+        "Value": [
+            0.2,
+            1.05,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "ν, ϕ, κ₀": {
+        "AbsError": [
+            0.011999468193850671,
+            0.004301409706628456,
+            0.18176359117240626
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            0.9880005318061493,
+            0.29569859029337153,
+            1.1817635911724063
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 257,
+        "InitialGuess": [
+            1.3,
+            0.39,
+            1.3
+        ],
+        "Iterations": 139,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 58.705,
+        "Value": [
+            1.0,
+            0.3,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "ν, ψ₀, κ₀": {
+        "AbsError": [
+            0.0173655757801644,
+            0.004687343094333496,
+            0.13148650798651307
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            0.9826344242198356,
+            1.0546873430943335,
+            1.131486507986513
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 353,
+        "InitialGuess": [
+            1.3,
+            1.3650000000000002,
+            1.3
+        ],
+        "Iterations": 195,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 100.89,
+        "Value": [
+            1.0,
+            1.05,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "ν, ψ₀, ϕ": {
+        "AbsError": [
+            0.3103192694284962,
+            0.2228777598574221,
+            0.24060306723062247
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            1.3103192694284962,
+            1.2728777598574221,
+            0.5406030672306225
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 132,
+        "InitialGuess": [
+            1.3,
+            1.3650000000000002,
+            0.39
+        ],
+        "Iterations": 65,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 31.042,
+        "Value": [
+            1.0,
+            1.05,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "χ, ν, κ₀": {
+        "AbsError": [
+            0.437507041155059,
+            0.5089188968131628,
+            0.5264874051535589
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.437507041155059,
+            1.5089188968131628,
+            1.5264874051535589
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 153,
+        "InitialGuess": [
+            2.6,
+            1.3,
+            1.3
+        ],
+        "Iterations": 77,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 37.263,
+        "Value": [
+            2.0,
+            1.0,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "χ, ν, ϕ": {
+        "AbsError": [
+            0.435073005886943,
+            0.001706615881871043,
+            0.053479086653519636
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.435073005886943,
+            0.998293384118129,
+            0.24652091334648035
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 297,
+        "InitialGuess": [
+            2.6,
+            1.3,
+            0.39
+        ],
+        "Iterations": 153,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 73.481,
+        "Value": [
+            2.0,
+            1.0,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "χ, ν, ψ₀": {
+        "AbsError": [
+            2.491554672540719,
+            0.669283382148142,
+            0.3043406433522631
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            4.491554672540719,
+            0.330716617851858,
+            1.3543406433522631
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 162,
+        "InitialGuess": [
+            2.6,
+            1.3,
+            1.3650000000000002
+        ],
+        "Iterations": 80,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 64.074,
+        "Value": [
+            2.0,
+            1.0,
+            1.05
+        ],
+        "WarmStart": true
+    },
+    "χ, ϕ, κ₀": {
+        "AbsError": [
+            0.26396961338239855,
+            0.04304968091558342,
+            0.9406166615002525
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.2639696133823985,
+            0.25695031908441657,
+            1.9406166615002525
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 140,
+        "InitialGuess": [
+            2.6,
+            0.39,
+            1.3
+        ],
+        "Iterations": 75,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 30.835,
+        "Value": [
+            2.0,
+            0.3,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "χ, ψ₀, κ₀": {
+        "AbsError": [
+            0.965923443483721,
+            0.1156016030628022,
+            1.1048035650070203
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.965923443483721,
+            1.1656016030628022,
+            2.1048035650070203
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 189,
+        "InitialGuess": [
+            2.6,
+            1.3650000000000002,
+            1.3
+        ],
+        "Iterations": 90,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 48.331,
+        "Value": [
+            2.0,
+            1.05,
+            1.0
+        ],
+        "WarmStart": true
+    },
+    "χ, ψ₀, ϕ": {
+        "AbsError": [
+            0.47077539881609365,
+            0.34650653420325717,
+            0.3161066438156834
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            2.4707753988160936,
+            1.3965065342032572,
+            0.6161066438156834
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 160,
+        "InitialGuess": [
+            2.6,
+            1.3650000000000002,
+            0.39
+        ],
+        "Iterations": 79,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 42.053,
+        "Value": [
+            2.0,
+            1.05,
+            0.3
+        ],
+        "WarmStart": true
+    },
+    "ψ₀, ϕ, κ₀": {
+        "AbsError": [
+            0.25990433443496763,
+            0.255746398089208,
+            0.49420535653876696
+        ],
+        "Convergence": true,
+        "ErrorFailed": false,
+        "Estimate": [
+            1.3099043344349677,
+            0.555746398089208,
+            1.494205356538767
+        ],
+        "EstimateFailed": false,
+        "Evaluations": 141,
+        "InitialGuess": [
+            1.3650000000000002,
+            0.39,
+            1.3
+        ],
+        "Iterations": 72,
+        "PerturbMode": "fixed",
+        "StopReason": "g_converged",
+        "Time": 35.131,
+        "Value": [
+            1.05,
+            0.3,
+            1.0
+        ],
+        "WarmStart": true
+    }
+}

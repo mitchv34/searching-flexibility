@@ -1,13 +1,13 @@
 ModelParameters:
-  kappa0: 1.0         # Vacancy posting cost parameter 0
+  kappa0: 2.0         # NEW, higher baseline - Vacancy posting cost parameter 0
   kappa1: 1.0         # Vacancy posting cost parameter 1
   beta: 0.996         # Time discount factor
   delta: 0.011        # Baseline job destruction rate
   b: 0.7             # Unemployment benefits
   xi: 0.5             # Worker bargaining power
-  A0: 0.0             # Production function constant
-  A1: 1.62            # Production function coefficient for skill
-  psi_0: 1.05          # Remote work amenability base parameter
+  A0: 5.0             # NEW, positive baseline - Production function constant
+  A1: 1.0            # Reset to neutral - Production function coefficient for skill
+  psi_0: 0.7          # NEW, lower baseline - Remote work amenability base parameter
   phi: 0.3            # Exponent for skill in remote productivity
   nu: 1.0             # Exponent for psi in remote productivity
   c0: 0.2             # Utility function cost parameter
@@ -27,3 +27,5 @@ ModelGrids:
   n_h: 100             # Number of grid points for skill (h)
   h_min: 0.05          # Minimum value for h grid (avoid starting at zero for numeric reasons)
   h_max: 1.0          # Maximum value for h grid
+
+  

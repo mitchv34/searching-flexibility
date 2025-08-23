@@ -1,0 +1,47 @@
+# Optimized parameters from MPI search - Top Candidates CSV
+# Best objective value: 10.53363286
+# Generated from: top_candidates.csv
+# Generated: 2025-08-22T10:47:01.447
+# 
+# Parameters updated from search results:
+#   κ₀, A₁, ψ₀, ϕ, ν, c₀, χ, μ, aₕ, bₕ
+# Parameters kept from template:
+#   beta, delta, b, xi, gamma0, gamma1, A0, kappa1
+
+ModelSolverOptions:
+  tol: 1.0e-8
+  print_freq: 50
+  lambda_u_init: 0.001
+  max_iter: 50000
+  verbose: false
+  initial_S: ~
+  lambda_S_init: 0.001
+ModelParameters:
+  nu: 0.20709487915039063
+  b: 0.1
+  kappa1: 1.0
+  delta: 0.011
+  mu: 0.027230682373046877
+  chi: 5.00909423828125
+  phi: 0.5861701965332031
+  xi: 0.5
+  kappa0: 2.4108032226562504
+  b_h: 4.539581298828125
+  psi_0: 0.08356826782226562
+  a_h: 3.469207763671875
+  beta: 0.996
+  gamma1: 0.5
+  A1: 0.800787353515625
+  A0: 5.0
+  c0: 0.05817321777343751
+  gamma0: 1.0
+ModelGrids:
+  n_psi: 100
+  psi_column: "psi"
+  psi_max: 1.0
+  h_min: 0.05
+  n_h: 101
+  h_max: 1.0
+  psi_data: "/project/high_tech_ind/searching-flexibility/data/results/psi_distribution_Post_COVID.csv"
+  psi_weight: "probability_mass"
+  psi_min: 0.0

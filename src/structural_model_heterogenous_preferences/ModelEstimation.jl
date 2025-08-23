@@ -5,9 +5,11 @@
 # runner should include `ModelSetup.jl` and `ModelSolver.jl` once before
 # including `ModelEstimation.jl`.
 
-using Random, Statistics, Distributions, LinearAlgebra , ForwardDiff
+using Random, Statistics, Distributions, LinearAlgebra, ForwardDiff
 using Printf, Term, YAML
 using CSV, DataFrames
+using QuadGK # For numerical integration in Gumbel model
+# Note: Optimization packages should be imported by the calling script
 
 function update_primitives_results(
                                     prim::Primitives,
@@ -33,8 +35,8 @@ function update_primitives_results(
     δv   = get(params_to_update, :δ,  prim.δ)
     b    = get(params_to_update, :b,  prim.b)
     ξ    = get(params_to_update, :ξ,  prim.ξ)
-    # shape parameter for z distribution
-    k    = get(params_to_update, :k, prim.k)
+    # Gumbel location parameter
+    μ    = get(params_to_update, :μ, prim.μ)
 
     # Grids and bounds
     n_ψ   = prim.n_ψ
@@ -61,7 +63,7 @@ function update_primitives_results(
         A₀ = T_new(A₀); A₁ = T_new(A₁); ψ₀ = T_new(ψ₀); ϕ = T_new(ϕ); ν = T_new(ν)
         c₀ = T_new(c₀); χ = T_new(χ); γ₀ = T_new(γ₀); γ₁ = T_new(γ₁)
         κ₀ = T_new(κ₀); κ₁ = T_new(κ₁); βv = T_new(βv); δv = T_new(δv)
-        b  = T_new(b);   ξ  = T_new(ξ);   k  = T_new(k)
+        b  = T_new(b);   ξ  = T_new(ξ);   μ  = T_new(μ)
 
         ψ_min = T_new(ψ_min); ψ_max = T_new(ψ_max)
         aₕ = T_new(aₕ); bₕ = T_new(bₕ)
@@ -72,7 +74,7 @@ function update_primitives_results(
         h_grid = T_new.(h_grid); h_pdf = T_new.(h_pdf); h_cdf = T_new.(h_cdf)
     end
 
-    # --- Stage 3: Recompute h and z distribution only if relevant params changed ---
+    # --- Stage 3: Recompute h distribution only if relevant params changed ---
     recompute_h = any(k -> k in (:aₕ, :bₕ, :h_grid, :h_min, :h_max), keys(params_to_update))
     if recompute_h
         h_scaled = (h_grid .- h_min) ./ (h_max - h_min)
@@ -82,17 +84,10 @@ function update_primitives_results(
         h_cdf = cumsum(h_pdf)
         h_cdf ./= h_cdf[end]
     end
-    recompute_z = :k in keys(params_to_update)
-    if recompute_z
-        z_dist = Distributions.Gamma(k, 1)
-    else
-        z_dist = deepcopy(prim.z_dist)
-    end
 
     # --- Stage 4: Build validated Primitives and fresh Results ---
     new_prim = validated_Primitives(
-        A₀=A₀, A₁=A₁, ψ₀=ψ₀, ϕ=ϕ, ν=ν, c₀=c₀, χ=χ, γ₀=γ₀, γ₁=γ₁,
-        k=k, z_dist=z_dist,
+        A₀=A₀, A₁=A₁, ψ₀=ψ₀, ϕ=ϕ, ν=ν, c₀=c₀, χ=χ, γ₀=γ₀, γ₁=γ₁, μ=μ,
         κ₀=κ₀, κ₁=κ₁, β=βv, δ=δv, b=b, ξ=ξ,
         n_ψ=n_ψ, ψ_min=ψ_min, ψ_max=ψ_max, ψ_grid=ψ_grid, ψ_pdf=ψ_pdf, ψ_cdf=ψ_cdf,
         aₕ=aₕ, bₕ=bₕ, n_h=n_h, h_min=h_min, h_max=h_max, h_grid=h_grid, h_pdf=h_pdf, h_cdf=h_cdf,
@@ -117,12 +112,9 @@ end
 function _zero_moments(θ::T; keys::Union{Nothing, Vector{Symbol}}=nothing) where {T<:Real}
     default_keys = [
         :mean_logwage, :var_logwage, :mean_alpha, :var_alpha,
-        :mean_logwage_inperson, :mean_logwage_remote,
-        :diff_logwage_inperson_remote, :hybrid_share, :agg_productivity, :dlogw_dpsi_mean_RH,
-        :mean_logwage_RH_lowpsi, :mean_logwage_RH_highpsi, :diff_logwage_RH_high_lowpsi,
-        :mean_alpha_highpsi, :mean_alpha_lowpsi, :diff_alpha_high_lowpsi,
-        :var_logwage_highpsi, :var_logwage_lowpsi, :ratio_var_logwage_high_lowpsi,
-        :market_tightness
+        :inperson_share, :hybrid_share, :remote_share,
+        :agg_productivity, :diff_alpha_high_lowpsi,
+        :market_tightness, :job_finding_rate
     ]
     use_keys = isnothing(keys) ? default_keys : keys
     out = Dict{Symbol, T}()
@@ -132,52 +124,70 @@ function _zero_moments(θ::T; keys::Union{Nothing, Vector{Symbol}}=nothing) wher
     return out
 end
 
-function _compute_mean_var(sum_x::T, sum_x2::T, sum_wts::T)::Tuple{T, T} where {T<:Real}
-    if ForwardDiff.value(sum_wts) > 0
-        μ = sum_x / sum_wts
-        σ2 = max(0.0, (sum_x2 / sum_wts) - μ^2)
-        return μ, σ2
-    else
-        return 0.0, 0.0
-    end
-end
-
 function _find_quantile_index(cdf::Vector{T}, quantile::T, n::Int)::Int where {T<:Real}
     idx = findfirst(>=(ForwardDiff.value(quantile)), ForwardDiff.value.(cdf))
     return idx === nothing ? n : idx
 end
 
-function calculate_average_policies(prim::Primitives{T}, res::Results{T}) where {T<:Real}
-    @unpack n_h, n_ψ, h_grid, ψ_grid, k, β, δ, ξ, c₀, χ = prim
-    @unpack U, S = res
+function _calculate_policy_arrays(prim::Primitives)
+    @unpack n_h, n_ψ, h_grid, ψ_grid, A₀, A₁, ψ₀, ν, ϕ, c₀, μ = prim
     
-    avg_alpha = Matrix{T}(undef, n_h, n_ψ)
-    avg_alpha_sq = Matrix{T}(undef, n_h, n_ψ) # For variance calculation
-    avg_wage = Matrix{T}(undef, n_h, n_ψ)
+    h_col = reshape(h_grid, n_h, 1)
+    ψ_row = reshape(ψ_grid, 1, n_ψ)
+    
+    A_h = A₀ .+ A₁ .* h_col
+    g = @. ψ₀ * exp(ν * ψ_row + ϕ * h_col)
+    
+    # This is the deterministic value function V(α)
+    V_alpha(α, h_idx, ψ_idx) = A_h[h_idx] * ((1-α) + α * g[h_idx, ψ_idx]) - c₀ * (1-α)
 
-    z_dist = Gamma(k, 1.0)
-    E = expectation(z_dist)
-
-    Threads.@threads for i_h in 1:n_h
-        h = h_grid[i_h]
-        for i_ψ in 1:n_ψ
-            ψ = ψ_grid[i_ψ]
-
-            # --- E[α] and E[α^2] ---
-            alpha_func(z) = optimal_alpha_given_z(prim, h, ψ, z)
-            avg_alpha[i_h, i_ψ] = E(alpha_func)
-            avg_alpha_sq[i_h, i_ψ] = E(z -> alpha_func(z)^2)
-
-            # --- E[w] ---
-            wage_func(z) = begin
-                alpha_star = alpha_func(z)
-                base_wage = (1 - β*(1-δ)) * (U[i_h] + ξ * S[i_h, i_ψ]) - (β*δ*U[i_h])
-                compensating_diff = c₀ * z * (1 - alpha_star)^(1 + χ) / (1 + χ)
-                return base_wage + compensating_diff
-            end
-            avg_wage[i_h, i_ψ] = E(wage_func)
+    # Pre-calculate the denominator (the integral) for every (h,ψ) pair
+    integral_val = Matrix{eltype(h_grid)}(undef, n_h, n_ψ)
+    Threads.@threads for j in 1:n_ψ
+        for i in 1:n_h
+            integrand(α) = exp(V_alpha(α, i, j) / μ)
+            integral_val[i, j], _ = quadgk(integrand, 0.0, 1.0)
         end
     end
+
+    # Now define the closure for the PDF, p(α) = exp(V/μ) / ∫exp(V/μ)
+    function p_alpha_func(α, h_idx, ψ_idx)
+        numerator = exp(V_alpha(α, h_idx, ψ_idx) / μ)
+        return numerator / integral_val[h_idx, ψ_idx]
+    end
+
+    return p_alpha_func # Return the PDF function
+end
+
+function calculate_average_policies(prim::Primitives{T}, res::Results{T}) where {T<:Real}
+    @unpack n_h, n_ψ, β, δ, ξ, c₀ = prim
+    
+    # Get the correctly defined PDF function
+    p_alpha_func = _calculate_policy_arrays(prim)
+    
+    avg_alpha = Matrix{T}(undef, n_h, n_ψ)
+    avg_alpha_sq = Matrix{T}(undef, n_h, n_ψ)
+    avg_wage = Matrix{T}(undef, n_h, n_ψ)
+    
+    # Define the Base Wage Component
+    flow_value_of_unemployment = (1 - β) .* res.U
+    base_wage_component = flow_value_of_unemployment .+ ξ .* res.S .* (1 - β * (1 - δ))
+
+    # Use Threads.@threads for performance
+    Threads.@threads for j in 1:n_ψ
+        for i in 1:n_h
+            # Integrate α * p(α|h,ψ) to get E[α|h,ψ]
+            integrand_alpha(α) = α * p_alpha_func(α, i, j)
+            avg_alpha[i, j], _ = quadgk(integrand_alpha, 0.0, 1.0, rtol=1e-6)
+            
+            # Integrate α² * p(α|h,ψ) to get E[α²|h,ψ]
+            integrand_alpha_sq(α) = (α^2) * p_alpha_func(α, i, j)
+            avg_alpha_sq[i, j], _ = quadgk(integrand_alpha_sq, 0.0, 1.0, rtol=1e-6)
+        end
+    end
+    
+    # The expected wage is Base Wage + E[c(1-α)] = Base Wage + c₀ * (1 - E[α])
+    @. avg_wage = base_wage_component + c₀ * (1.0 - avg_alpha)
     
     return avg_alpha, avg_alpha_sq, avg_wage
 end
@@ -185,24 +195,27 @@ end
 function compute_model_moments(
                                 prim::Primitives{T},
                                 res::Results{T};
-                                q_low_cut::T=0.5,
-                                q_high_cut::T=0.75,
+                                q_low_cut::T=T(0.9),
+                                q_high_cut::T=T(0.9),
+                                αtol::T = T(0.2),
                                 include::Union{Nothing, Vector{Symbol}, Symbol}=nothing
                             ) where {T<:Real}
 
+    
     default_keys = [
-        :mean_logwage, :var_logwage, :mean_alpha, :var_alpha, :diff_logwage_inperson_remote,
-        :hybrid_share, :agg_productivity, :dlogw_dpsi_mean_RH,
-        :mean_logwage_RH_lowpsi, :mean_logwage_RH_highpsi, :diff_logwage_RH_high_lowpsi,
-        :mean_alpha_highpsi, :mean_alpha_lowpsi, :diff_alpha_high_lowpsi,
-        :var_logwage_highpsi, :var_logwage_lowpsi, :ratio_var_logwage_high_lowpsi,
-        :diff_logwage_inperson_remote, :market_tightness
+        :mean_logwage, :var_logwage,
+        :mean_alpha, :var_alpha,
+        :inperson_share, :hybrid_share, :remote_share,
+        :agg_productivity,
+        :diff_alpha_high_lowpsi,
+        :market_tightness, :job_finding_rate
     ]
 
+    # FIXED: Properly determine which moments to return
     if include === :all
         include_keys = default_keys
     elseif isa(include, Vector{Symbol})
-        include_keys = include
+        include_keys = include  # Use exactly what was requested
     elseif include === nothing
         include_keys = default_keys
     else
@@ -210,186 +223,87 @@ function compute_model_moments(
     end
 
     n::Matrix{T} = res.n
-    
-    # MAJOR FIX: Calculate actual expected policies instead of using zeros
+
     avg_alpha_policy, avg_alpha_sq_policy, avg_wage_policy = calculate_average_policies(prim, res)
 
-    @unpack h_grid, ψ_grid, ψ_cdf = prim
-    production_fun = (h, ψ, α) -> (prim.A₀ + prim.A₁*h) * ((1 - α) + α * (prim.ψ₀ * h^prim.ϕ * ψ^prim.ν))
+    @unpack h_grid, ψ_grid, ψ_cdf, ψ₀, ν, ϕ, A₀, A₁ = prim
+    
+    αtol_val::Float64 = Float64(αtol)
+    valid::BitMatrix = (n .> 0.0) .& (avg_wage_policy .> 0.0)
 
-    total_emp::T = sum(n)
+    total_emp::T = sum(n .* valid)
     if !(ForwardDiff.value(total_emp) > 0)
         return _zero_moments(res.θ; keys=include_keys)
     end
-
-    αtol::Float64 = 1e-8
-    valid::BitMatrix = (n .> 0.0) .& (avg_wage_policy .> 0.0)
-
-    n_ψ::Int = length(ψ_grid)
-    idx_low_end::Int = _find_quantile_index(ψ_cdf, q_low_cut, n_ψ)
-    idx_high_start::Int = max(_find_quantile_index(ψ_cdf, q_high_cut, n_ψ), idx_low_end + 1)
-
-    sum_alpha::T = 0.0
-    sum_alpha_sq::T = 0.0  # NEW: For variance calculation
-    total_employment::T = 0.0
-
-    sum_wts::T = 0.0
-    sum_logw::T = 0.0
-    sum_logw2::T = 0.0
-
-    sum_n_inperson::T = 0.0; sum_logw_inperson::T = 0.0
-    sum_n_remote::T = 0.0; sum_logw_remote::T = 0.0
-    sum_n_interior::T = 0.0
-
-    sum_production::T = 0.0
-
-    sum_dlogw_dpsi_RH::T = 0.0
-    sum_n_RH::T = 0.0
-
-    sum_n_low::T = 0.0; sum_alpha_low::T = 0.0
-    sum_logw_low::T = 0.0; sum_logw2_low::T = 0.0
-    sum_logw_RH_low::T = 0.0; sum_n_RH_low::T = 0.0
-
-    sum_n_high::T = 0.0; sum_alpha_high::T = 0.0
-    sum_logw_high::T = 0.0; sum_logw2_high::T = 0.0
-    sum_logw_RH_high::T = 0.0; sum_n_RH_high::T = 0.0
-
-    for (i_h, h) in enumerate(h_grid)
-        for (i_ψ, ψ) in enumerate(ψ_grid)
-            n_cell::T = n[i_h, i_ψ]
-            n_cell > 0.0 || continue
-
-            # Use the computed expected policies instead of zeros
-            alpha_cell = avg_alpha_policy[i_h, i_ψ]
-            alpha_sq_cell = avg_alpha_sq_policy[i_h, i_ψ]
-            w_cell = avg_wage_policy[i_h, i_ψ]
-            
-            # Accumulate alpha moments for mean and variance
-            sum_alpha += alpha_cell * n_cell
-            sum_alpha_sq += alpha_sq_cell * n_cell  # NEW: For variance calculation
-            total_employment += n_cell
-
-            α_cell::T = alpha_cell  # For compatibility with existing code
-
-            is_valid::Bool = valid[i_h, i_ψ]
-            is_inperson::Bool = ForwardDiff.value(α_cell) <= αtol
-            is_remote::Bool = ForwardDiff.value(α_cell) >= (1.0 - αtol)
-            is_interior::Bool = (ForwardDiff.value(α_cell) > αtol) && (ForwardDiff.value(α_cell) < (1.0 - αtol))
-            is_RH::Bool = ForwardDiff.value(α_cell) > αtol
-            is_low_psi::Bool = i_ψ <= idx_low_end
-            is_high_psi::Bool = i_ψ >= idx_high_start
-
-            sum_production += production_fun(h, ψ, α_cell) * n_cell
-
-            if !is_valid
-                continue
-            end
-
-            logw_cell::T = log(w_cell)
-
-            sum_wts += n_cell
-            sum_logw += logw_cell * n_cell
-            sum_logw2 += (logw_cell^2) * n_cell
-
-            if is_inperson
-                sum_logw_inperson += logw_cell * n_cell
-                sum_n_inperson += n_cell
-            elseif is_remote
-                sum_logw_remote += logw_cell * n_cell
-                sum_n_remote += n_cell
-            end
-
-            if is_interior
-                sum_n_interior += n_cell
-            end
-            if is_RH
-                dg_dpsi::T = prim.ψ₀ * (h^prim.ϕ) * (prim.ν * ψ^(prim.ν - 1))
-                dw_dpsi::T = prim.A₁ * h * dg_dpsi * (
-                    (prim.ξ * α_cell) / (1.0 - prim.β * (1.0 - prim.δ)) - (1.0 - α_cell) / prim.χ
-                )
-                sum_dlogw_dpsi_RH += (dw_dpsi / w_cell) * n_cell
-                sum_n_RH += n_cell
-            end
-
-            if is_low_psi
-                sum_n_low += n_cell
-                sum_alpha_low += α_cell * n_cell
-                sum_logw_low += logw_cell * n_cell
-                sum_logw2_low += (logw_cell^2) * n_cell
-                if is_RH
-                    sum_logw_RH_low += logw_cell * n_cell
-                    sum_n_RH_low += n_cell
-                end
-            end
-
-            if is_high_psi
-                sum_n_high += n_cell
-                sum_alpha_high += α_cell * n_cell
-                sum_logw_high += logw_cell * n_cell
-                sum_logw2_high += (logw_cell^2) * n_cell
-                if is_RH
-                    sum_logw_RH_high += logw_cell * n_cell
-                    sum_n_RH_high += n_cell
-                end
-            end
-        end
-    end
-
-    mean_alpha = total_employment > 0 ? sum_alpha / total_employment : 0.0
-    # MAJOR FIX: Calculate var_alpha properly using E[α²] - (E[α])²
-    E_alpha_sq = total_employment > 0 ? sum_alpha_sq / total_employment : 0.0
-    var_alpha = E_alpha_sq - mean_alpha^2
     
-    mean_logwage, var_logwage = _compute_mean_var(sum_logw, sum_logw2, sum_wts)
-    mean_logwage_inperson = ForwardDiff.value(sum_n_inperson) > 0 ? sum_logw_inperson / sum_n_inperson : 0.0
-    mean_logwage_remote = ForwardDiff.value(sum_n_remote) > 0 ? sum_logw_remote / sum_n_remote : 0.0
-    diff_logwage_inperson_remote = mean_logwage_inperson - mean_logwage_remote
+    idx_low_end::Int = _find_quantile_index(ψ_cdf, q_low_cut, length(ψ_grid))
+    idx_high_start::Int = max(_find_quantile_index(ψ_cdf, .9, length(ψ_grid)), idx_low_end + 1)
 
-    hybrid_share = ForwardDiff.value(sum_n_interior) / ForwardDiff.value(total_emp)
-    agg_productivity = ForwardDiff.value(sum_production) / ForwardDiff.value(total_emp)
-    dlogw_dpsi_mean_RH = ForwardDiff.value(sum_n_RH) > 0 ? sum_dlogw_dpsi_RH / sum_n_RH : 0.0
+    #> Masks
+    is_inperson = @. ForwardDiff.value(avg_alpha_policy) <= αtol_val
+    is_remote = @. ForwardDiff.value(avg_alpha_policy) >= (1.0 - αtol_val)
+    is_hybrid = @. (ForwardDiff.value(avg_alpha_policy) > αtol_val) && (ForwardDiff.value(avg_alpha_policy) < (1.0 - αtol_val))
+    is_low_psi = zeros(Bool, size(is_hybrid)); is_low_psi[:, 1:idx_low_end] .= true;
+    is_high_psi = zeros(Bool, size(is_hybrid)); is_high_psi[:, idx_high_start:end] .= true;
 
-    mean_logwage_RH_lowpsi = ForwardDiff.value(sum_n_RH_low) > 0 ? sum_logw_RH_low / sum_n_RH_low : 0.0
-    mean_logwage_RH_highpsi = ForwardDiff.value(sum_n_RH_high) > 0 ? sum_logw_RH_high / sum_n_RH_high : 0.0
-    diff_logwage_RH_high_lowpsi = mean_logwage_RH_highpsi - mean_logwage_RH_lowpsi
+    #> Accumulators 
+    h_col = reshape(h_grid, prim.n_h, 1) # Create the column vector once
+    production = @. (A₀ + A₁ * h_col) * ( (1 - avg_alpha_policy) + avg_alpha_policy * (ψ₀ * exp(ν * ψ_grid' + ϕ * h_col)) )
 
-    mean_alpha_lowpsi = ForwardDiff.value(sum_n_low) > 0 ? sum_alpha_low / sum_n_low : 0.0
-    mean_alpha_highpsi = ForwardDiff.value(sum_n_high) > 0 ? sum_alpha_high / sum_n_high : 0.0
+    #> Final moments
+    # Define the correct denominators first for clarity
+    total_employment = sum(n)
+    total_valid_employment = sum(n .* valid)
+
+    # --- Unconditional Means (denominator is total_valid_employment) ---
+    mean_alpha = total_valid_employment > 0 ? sum(avg_alpha_policy .* n .* valid) / total_valid_employment : 0.0
+    mean_logwage = total_valid_employment > 0 ? sum(log.(max.(1e-12, avg_wage_policy)) .* n .* valid) / total_valid_employment : 0.0
+    
+    # --- Unconditional Variances (use correct means and denominator) ---
+    var_alpha = total_valid_employment > 0 ? sum(((avg_alpha_policy .- mean_alpha).^2) .* n .* valid) / total_valid_employment : 0.0
+    var_logwage = total_valid_employment > 0 ? sum(((log.(max.(1e-12, avg_wage_policy)) .- mean_logwage).^2) .* n .* valid) / total_valid_employment : 0.0
+    
+    # --- Shares (denominator is total_employment) ---
+    inperson_share = total_employment > 0 ? sum(n .* is_inperson) / total_employment : 0.0
+    remote_share = total_employment > 0 ? sum(n .* is_remote) / total_employment : 0.0
+    hybrid_share = total_employment > 0 ? sum(n .* is_hybrid) / total_employment : 0.0
+    
+    # --- Other Aggregate Moments ---
+    agg_productivity = total_employment > 0 ? sum(production .* n .* valid) / total_employment : 0.0
+    market_tightness = res.θ
+    job_finding_rate = res.p
+    
+    # --- Conditional Means ---
+    sum_n_low_valid = sum(n .* is_low_psi .* valid)
+    sum_n_high_valid = sum(n .* is_high_psi .* valid)
+    
+    mean_alpha_lowpsi = sum_n_low_valid > 0 ? sum(avg_alpha_policy .* n .* is_low_psi .* valid) / sum_n_low_valid : 0.0
+    mean_alpha_highpsi = sum_n_high_valid > 0 ? sum(avg_alpha_policy .* n .* is_high_psi .* valid) / sum_n_high_valid : 0.0
     diff_alpha_high_lowpsi = mean_alpha_highpsi - mean_alpha_lowpsi
 
-    _, var_logwage_lowpsi = _compute_mean_var(sum_logw_low, sum_logw2_low, sum_n_low)
-    _, var_logwage_highpsi = _compute_mean_var(sum_logw_high, sum_logw2_high, sum_n_high)
-    ratio_var_logwage_high_lowpsi = ForwardDiff.value(var_logwage_lowpsi) > 0 ? var_logwage_highpsi / var_logwage_lowpsi : 0.0
-
+    # Create full dictionary of ALL computed moments
     full = Dict{Symbol, T}(
         :mean_logwage => mean_logwage,
         :var_logwage => var_logwage,
         :mean_alpha => mean_alpha,
-        :var_alpha => var_alpha,  # MAJOR FIX: Actually include var_alpha in the output
-        :mean_logwage_inperson => mean_logwage_inperson,
-        :mean_logwage_remote => mean_logwage_remote,
-        :diff_logwage_inperson_remote => diff_logwage_inperson_remote,
+        :var_alpha => var_alpha,
+        :inperson_share => inperson_share,
         :hybrid_share => hybrid_share,
+        :remote_share => remote_share,
         :agg_productivity => agg_productivity,
-        :dlogw_dpsi_mean_RH => dlogw_dpsi_mean_RH,
-        :mean_logwage_RH_lowpsi => mean_logwage_RH_lowpsi,
-        :mean_logwage_RH_highpsi => mean_logwage_RH_highpsi,
-        :diff_logwage_RH_high_lowpsi => diff_logwage_RH_high_lowpsi,
-        :mean_alpha_highpsi => mean_alpha_highpsi,
-        :mean_alpha_lowpsi => mean_alpha_lowpsi,
         :diff_alpha_high_lowpsi => diff_alpha_high_lowpsi,
-        :var_logwage_highpsi => var_logwage_highpsi,
-        :var_logwage_lowpsi => var_logwage_lowpsi,
-        :ratio_var_logwage_high_lowpsi => ratio_var_logwage_high_lowpsi,
-        :market_tightness => res.θ
+        :market_tightness => market_tightness,
+        :job_finding_rate => job_finding_rate
     )
 
+    # FIXED: Only return the moments that were actually requested
     result = Dict{Symbol, T}()
     for k in include_keys
         if haskey(full, k)
             result[k] = full[k]
         else
-            result[k] = zero(T)
+            @warn "Requested moment $k not available, skipping"
+            # Don't add it to result - this prevents phantom moments
         end
     end
 
@@ -411,40 +325,6 @@ function load_moments_from_yaml(filename::String)
     return Dict(Symbol(k) => v for (k,v) in pairs(moments_dict))
 end
 
-"""
-Compute empirical mean and variance of alpha from a CSV data file.
-If `weight_col` is provided, use it as observation weights.
-
-Arguments
-- `path::String`: path to CSV file
-- `alpha_col::Symbol`: column name for alpha
-- `weight_col::Union{Nothing, Symbol}`: optional weights column
-
-Returns Dict(:mean_alpha => ..., :var_alpha => ...)
-"""
-function compute_empirical_alpha_moments(path::String; alpha_col::Symbol=:alpha, weight_col::Union{Nothing,Symbol}=nothing)
-    # CSV and DataFrames are imported at the top of this file. Do not use
-    # `using` inside a function (Julia requires `using` at top-level).
-    df = CSV.read(path, DataFrame)
-    if !(alpha_col in names(df))
-        error("alpha column not found in data: $alpha_col")
-    end
-    α = df[!, alpha_col]
-    if !isnothing(weight_col)
-        if !(weight_col in names(df))
-            error("weight column not found: $weight_col")
-        end
-        w = df[!, weight_col]
-        sw = sum(w)
-        μ = sum(w .* α) / sw
-        μ2 = sum(w .* (α .^ 2)) / sw
-    else
-        μ = mean(α)
-        μ2 = mean(α .^ 2)
-    end
-    return Dict(:mean_alpha => μ, :var_alpha => max(0.0, μ2 - μ^2))
-end
-
 function compute_distance(
                             model_moments::Union{NamedTuple, AbstractDict},
                             data_moments::Union{NamedTuple, AbstractDict},
@@ -453,7 +333,7 @@ function compute_distance(
                         )
     current_moment_order = Symbol.(collect(keys(model_moments)))
     get_val(m, k) = m isa AbstractDict ? (haskey(m, k) ? m[k] : error("missing moment $k")) :
-                             (k in propertynames(m) ? getproperty(m, k) : error("missing moment $k"))
+                            (k in propertynames(m) ? getproperty(m, k) : error("missing moment $k"))
 
     g = [ get_val(model_moments, k) - get_val(data_moments, k) for k in current_moment_order ]
 
@@ -473,44 +353,39 @@ end
 
 function objective_function(params, p)
     params_to_update = Dict(p.param_names .=> params)
-    # --- WARM VS. COLD LOGIC ---
-    # Check if the parameter struct 'p' has the cache.
-    # If it does, use it for a warm start. If not, do a cold start.
     
     # Optional warm-start S if available
     initial_S = haskey(p, :last_res) ? p.last_res[].S : nothing
     
-    # Read the current solver state
-    current_solver_params = p.solver_state[] 
-    λ_S_start = current_solver_params.λ_S_init
-    λ_u_start = current_solver_params.λ_u_init
-
-
     # Solve with updated params (deepcopy res_base to avoid mutation across calls)
     prim_new, res_new = update_primitives_results(
                                                     p.prim_base, 
                                                     deepcopy(p.res_base),
                                                     params_to_update
                                                     );
-    λ_S_final, λ_u_final = solve_model(
-        prim_new, res_new,
+    
+    # --- REVISED: Use the non-adaptive solver and check status ---
+    status = solve_model(
+        prim_new, res_new;
         initial_S = initial_S,
-        tol      = get(p, :tol, 1e-7),
-        max_iter = get(p, :max_iter, 25_000),
+        tol      = get(p, :tol, 1e-8),
+        max_iter = get(p, :max_iter, 100_000),
         verbose  = false,
-        λ_S_init      = get(p, :λ_S_init, 0.01),
-        λ_u_init      = get(p, :λ_u_init, 0.01)
+        λ_S_init = get(p, :λ_S_init, 0.05),
+        λ_u_init = get(p, :λ_u_init, 0.05)
     )
+
+    # --- NEW: Penalize non-convergence ---
+    if status != :converged
+        return 1e10 # Return a massive penalty
+    end
 
     # Update warm-start cache
     if haskey(p, :last_res)
         p.last_res[] = res_new
-        # Update the solver state cache with the new final lambdas
-        p.solver_state[] = (λ_S_init = λ_S_final, λ_u_init = λ_u_final)
     end
-
     
-    model_moments = compute_model_moments(prim_new, res_new)
+    model_moments = compute_model_moments(prim_new, res_new; include=collect(keys(p.target_moments)))
 
     return compute_distance(
         model_moments,
@@ -600,7 +475,6 @@ function setup_estimation_problem(
 
     # --- Stage 2: build problem context ---
     last_res_ref = Ref(res_for_cache)
-    solver_state = Ref((λ_S_init=λ_S_init, λ_u_init=λ_u_init))
 
     p = (
         prim_base = prim_base,
@@ -608,14 +482,13 @@ function setup_estimation_problem(
         target_moments = target_moments,
         param_names = params_to_estimate,
         last_res = last_res_ref,         # enables warm starts in objective_function
-        solver_state = solver_state,     # rolling λ cache (updated in objective_function)
         weighting_matrix = weighting_matrix,
         matrix_moment_order = matrix_moment_order,
-        # pass-through solver controls used by objective_function via get(p, ...)
-        tol = tol,
-        max_iter = max_iter,
-        λ_S_init = λ_S_init,
-        λ_u_init = λ_u_init
+        # --- REVISED: Pass robust solver controls ---
+        tol = 1e-8,
+        max_iter = 100_000,
+        λ_S_init = 0.05,
+        λ_u_init = 0.05
     )
 
     # Create OptimizationProblem (SciML) with chosen AD

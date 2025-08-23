@@ -2,7 +2,7 @@
 
 using Pkg
 # activate project containing Project.toml (adjust path if needed)
-Pkg.activate(joinpath(@__DIR__, ".."))
+Pkg.activate("../../..")
 Pkg.instantiate()
 
 using TimerOutputs

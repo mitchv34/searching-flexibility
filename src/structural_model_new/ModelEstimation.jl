@@ -230,6 +230,42 @@ function _compute_mean_var(sum_x::T, sum_x2::T, sum_wts::T)::Tuple{T, T} where {
     end
 end
 
+"""
+    _compute_mean_var_skew(sum_x, sum_x2, sum_x3, sum_wts)
+
+Compute weighted mean μ, variance σ², and skewness γ from sums.
+μ = sum_x / sum_wts
+σ² = max(0.0, (sum_x2 / sum_wts) - μ²)
+γ = ( (sum_x3 / sum_wts) - 3μσ² - μ³ ) / σ³  (if σ > 0)
+
+Arguments
+- sum_x: sum of weighted observations
+- sum_x2: sum of squared weighted observations
+- sum_x3: sum of cubed weighted observations
+- sum_wts: sum of weights
+
+Returns
+- (μ, σ², γ) as a tuple; returns (0.0, 0.0, 0.0) if sum_wts <= 0.
+"""
+function _compute_mean_var_skew(sum_x::T, sum_x2::T, sum_x3::T, sum_wts::T)::Tuple{T, T, T} where {T<:Real}
+    if ForwardDiff.value(sum_wts) > 0
+        μ = sum_x / sum_wts
+        σ2 = max(0.0, (sum_x2 / sum_wts) - μ^2)
+        
+        if ForwardDiff.value(σ2) > 1e-9 # Safeguard for σ > 0
+            σ = sqrt(σ2)
+            # Formula for skewness from weighted central moments
+            μ3 = (sum_x3 / sum_wts) - 3 * μ * σ2 - μ^3
+            γ = μ3 / (σ^3)
+            return μ, σ2, γ
+        else
+            return μ, σ2, 0.0 # Return zero skewness if variance is zero
+        end
+    else
+        return 0.0, 0.0, 0.0
+    end
+end
+
 """Return the index of the first entry in `cdf` whose ForwardDiff.value >= ForwardDiff.value(quantile); if none is found, return `n`."""
 function _find_quantile_index(cdf::Vector{T}, quantile, n::Int)::Int where {T<:Real}
     idx = findfirst(>=(ForwardDiff.value(quantile)), ForwardDiff.value.(cdf))

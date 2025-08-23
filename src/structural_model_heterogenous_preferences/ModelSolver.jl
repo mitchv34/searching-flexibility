@@ -211,9 +211,8 @@ function calculate_logit_flow_surplus_with_curvature(prim::Primitives{T}) where 
             integral_val, _ = quadgk(stable_integrand, 0.0, 1.0)
             
             # --- STEP 4: Combine the results using the numerically stable formula ---
-            expected_max_value = V_max + μ * log(integral_val)
-            
-            s_flow[i_h, i_ψ] = expected_max_value - (b * h)
+            #> Notice that this is gross surplus without the unemployment flow value
+            s_flow[i_h, i_ψ] = V_max + μ * log(integral_val)
         end
     end
     
@@ -296,10 +295,10 @@ function solve_model(
     f_ψ = prim.ψ_pdf
 
     # Calculate flow surplus once
-    s_flow = calculate_logit_flow_surplus_with_curvature(prim)
+    s_flow_base = calculate_logit_flow_surplus_with_curvature(prim)
 
     # Initialize main arrays
-    S_final = isnothing(initial_S) ? copy(s_flow) : copy(initial_S)
+    S_final = isnothing(initial_S) ? copy(s_flow_base) : copy(initial_S)
     u_final = copy(prim.h_pdf)
     
     # Pre-allocate ALL temporary arrays to eliminate allocations in the loop
@@ -374,6 +373,16 @@ function solve_model(
             fill!(Γ, 0.0)
         end
 
+        # Now calculate the expected surplus
+        Expected_S_by_h = S_old * Γ
+
+        # The new b(h) vector
+        b_h = prim.b .* prim.ξ .* Expected_S_by_h
+
+        # Now, use this new b_h to calculate the new s_flow and the new surplus
+        # Note: s_flow now depends on b_h, so it must be recalculated or adjusted
+        s_flow = s_flow_base .- b_h # (Assuming s_flow_base is calculated once without b(h))
+        
         # ExpectedSearch = max.(0.0, S_old) * Γ (in-place matrix-vector multiply)
         fill!(ExpectedSearch, 0.0)
         for i in 1:n_h

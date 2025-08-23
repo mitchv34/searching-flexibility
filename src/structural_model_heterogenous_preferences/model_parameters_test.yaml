@@ -1,0 +1,29 @@
+ModelParameters:
+  kappa0: 1.0
+  kappa1: 1.0
+  beta: 0.996
+  delta: 0.011
+  b: 0.1
+  xi: 0.5
+  A0: 10.0
+  A1: 0.1
+  psi_0: 0.75      
+  phi: 0.1
+  nu: 0.25
+  c0: 0.05       
+  chi: 7.0       
+  gamma0: 1.0
+  gamma1: 0.5
+  a_h: 2.0
+  b_h: 5.0
+  mu: 0.05         
+ModelGrids:
+  n_psi: 50
+  psi_min: 0.0
+  psi_max: 1.0
+  psi_data: /project/high_tech_ind/searching-flexibility/data/results/psi_distribution_Pre_COVID.csv
+  psi_column: psi
+  psi_weight: probability_mass
+  n_h: 51
+  h_min: 0.05
+  h_max: 1.0

@@ -1,0 +1,116 @@
+# MPI Distributed Search Configuration
+# This file contains the configuration for the distributed MPI parameter search
+
+# Base model configuration - inherited from main model
+ModelParameters:
+  # Calibrated Parameters (Group 1)
+  β: 0.996
+  δ: 0.011
+  γ₀: 1.0
+  γ₁: 0.7668      # FINAL: Updated with your rigorous HSW estimate
+  κ₁: 1.0
+  A₁: 1.0        # Normalized for identification
+  b: 0.4         # Calibrated Surplus Replacement Rate
+  ξ: 0.5         # Kept fixed as per baseline (can be moved to estimation)
+
+  # Initial guesses for estimated parameters (will be ignored by search, but good for single runs)
+  κ₀: 850.0
+  A₀: 15.0
+  ψ₀: 0.75      
+  ϕ: 0.5
+  ν: 0.4
+  c₀: 5.0       
+  χ: 8.0       
+  aₕ: 2.0
+  bₕ: 5.0
+  μ: 0.05
+  
+ModelGrids:
+  # Discretized Grids 
+  n_ψ: 100
+  ψ_min: 0.0
+  ψ_max: 1.0
+  ψ_data: /project/high_tech_ind/searching-flexibility/data/results/psi_distribution_Post_COVID.csv
+  ψ_column: psi
+  ψ_weight: probability_mass
+  n_h: 101
+  h_min: 0.05
+  h_max: 1.0
+
+ModelSolverOptions:
+  # Solver Configuration - stricter for final results
+  tol: 1e-6               # High precision convergence tolerance
+  max_iter: 150000        # Allow more iterations for convergence
+  verbose: false          # Print convergence info
+  print_freq: 100         # Print frequency for verbose mode
+  lambda_S_init: 0.01     # Initial dampening parameter for surplus
+  lambda_u_init: 0.01     # Initial dampening parameter for unemployment
+  initial_S: null         # Initial surplus matrix (null for default)
+
+MPISearchConfig:
+  # Search algorithm configuration
+  algorithm: "genetic_algorithm"  # Options: "random_search", "genetic_algorithm", "bayesian_optimization"
+  n_samples: 100000            # Total number of parameter vectors to evaluate (no underscores for YAML)
+  
+  # Parameter search space
+  parameters:
+    names: ["aₕ", "bₕ", "c₀", "μ", "χ", "A₀", "ν", "ψ₀", "ϕ", "κ₀"]
+    bounds:
+      aₕ: [1.5, 4.0]
+      bₕ: [3.0, 7.0]
+      c₀: [1.0, 20.0]
+      μ:  [0.01, 0.2]
+      χ:  [2.0, 15.0]
+      A₀: [10.0, 25.0]
+      ν:  [0.1, 1.5]
+      ψ₀: [0.5, 0.95]
+      ϕ:  [0.1, 1.5]
+      κ₀: [500.0, 1200.0]
+  
+  # Target moments for optimization
+  target_moments:
+    data_file: "data/results/data_moments/data_moments_2024.yaml"
+    moments_to_use: [
+        "mean_logwage", 
+        "var_logwage",
+        "mean_alpha",
+        "var_alpha",
+        "inperson_share",
+        "remote_share",
+        "agg_productivity",
+        "diff_alpha_high_lowpsi",
+        "wage_premium_high_psi",  # Temporarily disabled - null in data
+        "wage_slope_psi",         # Temporarily disabled - null in data
+        "market_tightness"
+    ]
+  
+  # Advanced search options
+  search_options:
+    # Genetic Algorithm settings (if algorithm == "genetic_algorithm")
+    population_size: 400
+    mutation_rate: 0.05
+    crossover_rate: 0.8
+    n_generations: 250
+    elite_fraction: 0.1
+    
+    # Random search settings (if algorithm == "random_search")
+    sampling_method: "sobol"  # Options: "uniform", "latin_hypercube", "sobol" #TODO: Modify mpi_search to be able to accept different methods.
+    batch_size: 1000           # Number of evaluations per batch (for progress reporting)
+    
+    # Bayesian optimization settings (if algorithm == "bayesian_optimization")
+    n_initial_points: 100
+    acquisition_function: "expected_improvement"
+    
+  # Output and logging
+  output:
+    results_dir: "output/mpi_search_results"
+    checkpoint_frequency: 1000   # Save progress every N evaluations
+    save_all_results: false       # Save all parameter vectors and objectives
+    detailed_logging: true       # Verbose progress logging
+    
+  # Performance monitoring
+  performance:
+    timing_diagnostics: true
+    memory_monitoring: true
+    convergence_tracking: true
+  

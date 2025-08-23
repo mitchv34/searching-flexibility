@@ -31,14 +31,12 @@ prim, res = initializeModel(config);
 
 # Distribution plot moved toplot_z_distribution(prim)
 
-s_flow = calculate_expected_flow_surplus(prim)
+s_flow = calculate_logit_flow_surplus_with_curvature(prim)
 
 # Use plotting helpers in ModelPlotting for consistency
-fig_z =plot_z_distribution(prim)
 fig_s1, fig_s2, fig_s3, fig_s4 =plot_s_flow_diagnostics(s_flow, prim)
 
 # Display core diagnostics
-fig_z |> display
 fig_s1 |> display
 fig_s2 |> display
 fig_s3 |> display

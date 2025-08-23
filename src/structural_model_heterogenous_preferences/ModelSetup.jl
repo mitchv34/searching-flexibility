@@ -6,7 +6,8 @@
 
 using Parameters, Distributions, YAML, ForwardDiff
 using OrderedCollections: OrderedDict
-include("helpers.jl") # Lean fit_kde_psi (pure Julia)
+using CSV, DataFrames
+
 #?=========================================================================================
 #? Model Data Structures
 #?=========================================================================================
@@ -17,10 +18,9 @@ include("helpers.jl") # Lean fit_kde_psi (pure Julia)
     c₀::T; χ::T
     γ₀::T; γ₁::T
     
-    # --- CHANGE: Added parameter k for preference heterogeneity ---
-    k::T 
-    z_dist::Gamma # The distribution object for z ~ Gamma(k, 1)
-
+    # Gumbel shock preference parameter
+    μ::T
+    
     # Market parameters
     κ₀::T; κ₁::T
     β::T; δ::T; b::T; ξ::T
@@ -45,10 +45,10 @@ end
 function validate!(p::Primitives)
     βv, δv = _unwrap(p.β), _unwrap(p.δ)
     κ0v, κ1v = _unwrap(p.κ₀), _unwrap(p.κ₁)
-    kv = _unwrap(p.k)
+    μv = _unwrap(p.μ)
 
     0 ≤ βv ≤ 1 || throw(ArgumentError("β must be in [0,1], got $(βv)"))
-    kv > 0 || throw(ArgumentError("k (Gamma shape) must be > 0, got $(kv)"))
+    # No specific constraint on μ for Gumbel location parameter
     return p
 end
 
@@ -89,35 +89,9 @@ end
 #?=========================================================================================
 #? Initialization and Helper Functions
 #?=========================================================================================
-# --- CHANGE: New core helper function with exponential g(h,ψ) ---
-# Given z, h, ψ, compute the analytical optimal α
-function optimal_alpha_given_z(prim::Primitives, h, ψ, z)
-    # Using the new, more stable exponential form for remote productivity
-    g_val = prim.ψ₀ * exp(prim.ν * ψ + prim.ϕ * h)
-    
-    # The first-order condition is A1*h*(1-g) = c₀*z*(1-α)^χ
-    # This only has an interior solution for α if g < 1.
-    if g_val >= 1.0
-        return 1.0 # Full remote is optimal
-    end
-
-    A_h = prim.A₀ + prim.A₁ * h
-    c_i = prim.c₀ * z
-    
-    term = (A_h / c_i) * (1.0 - g_val)
-
-    if term <= 0.0
-        return 0.0 # Full in-person is optimal
-    elseif term >= 1.0
-        return 1.0 # Full remote is optimal
-    else
-        # Interior solution
-        return 1.0 - term^(1.0 / prim.χ)
-    end
-end
 function create_primitives_from_yaml(yaml_file::String)
-    # This function loads 'k' from the YAML file and correctly constructs 
-    # the Primitives object, including z_dist.
+    # This function loads 'μ' from the YAML file and correctly constructs 
+    # the Primitives object with Gumbel distribution parameters.
     config = YAML.load_file(yaml_file, dicttype=OrderedDict)
     mp = get(config, "ModelParameters", Dict())
     mg = get(config, "ModelGrids", Dict())
@@ -126,32 +100,32 @@ function create_primitives_from_yaml(yaml_file::String)
     getp(k, default) = haskey(mp, k) ? mp[k] : default
     getg(k, default) = haskey(mg, k) ? mg[k] : default
 
-    # Scalars
-    A0 = parse(Float64, string(getp("A0", 0.0)))
-    A1 = parse(Float64, string(getp("A1", 1.0)))
-    psi0 = parse(Float64, string(getp("psi_0", getp("ψ₀", 1.0))))
-    phi = parse(Float64, string(getp("phi", getp("ϕ", 0.3))))
-    nu = parse(Float64, string(getp("nu", getp("ν", 1.0))))
-    c0 = parse(Float64, string(getp("c0", getp("c₀", 0.2))))
-    chi = parse(Float64, string(getp("chi", 2.0)))
-    gamma0 = parse(Float64, string(getp("gamma0", getp("γ₀", 1.0))))
-    gamma1 = parse(Float64, string(getp("gamma1", getp("γ₁", 0.5))))
-    k = parse(Float64, string(getp("k", 2.0))) # Ensure 'k' is in your YAML file
+    # Scalars - already handle Unicode/ASCII consistently
+    A₀ = parse(Float64, string(getp("A0", getp("A₀", 0.0))))
+    A₁ = parse(Float64, string(getp("A1", getp("A₁", 1.0))))
+    ψ₀ = parse(Float64, string(getp("psi_0", getp("ψ₀", 1.0))))
+    ϕ = parse(Float64, string(getp("phi", getp("ϕ", 0.3))))
+    ν = parse(Float64, string(getp("nu", getp("ν", 1.0))))
+    c₀ = parse(Float64, string(getp("c0", getp("c₀", 0.2))))
+    χ = parse(Float64, string(getp("chi", getp("χ", 2.0))))
+    γ₀ = parse(Float64, string(getp("gamma0", getp("γ₀", 1.0))))
+    γ₁ = parse(Float64, string(getp("gamma1", getp("γ₁", 0.5))))
+    μ = parse(Float64, string(getp("mu", getp("μ", 0.05)))) # Gumbel location parameter
 
-    κ0 = parse(Float64, string(getp("kappa0", getp("κ₀", 1.0))))
-    κ1 = parse(Float64, string(getp("kappa1", getp("κ₁", 1.0))))
-    β = parse(Float64, string(getp("beta", 0.996)))
-    δ = parse(Float64, string(getp("delta", 0.011)))
+    κ₀ = parse(Float64, string(getp("kappa0", getp("κ₀", 1.0))))
+    κ₁ = parse(Float64, string(getp("kappa1", getp("κ₁", 1.0))))
+    β = parse(Float64, string(getp("beta", getp("β", 0.996))))
+    δ = parse(Float64, string(getp("delta", getp("δ", 0.011))))
     b = parse(Float64, string(getp("b", 0.7)))
     ξ = parse(Float64, string(getp("xi", getp("ξ", 0.5))))
 
-    # ψ-grid inputs
-    n_ψ      = Int(mg["n_psi"])
-    ψ_min    = Float64(mg["psi_min"])
-    ψ_max    = Float64(mg["psi_max"])
-    ψ_data   = mg["psi_data"]          # expect a table-like or vector
-    ψ_column = mg["psi_column"]        # col name or index for ψ
-    ψ_weight = get(mg, "psi_weight", nothing)  # optional
+    # ψ-grid inputs - NOW HANDLE BOTH UNICODE AND ASCII
+    n_ψ      = Int(getg("n_psi", getg("n_ψ", 100)))
+    ψ_min    = Float64(getg("psi_min", getg("ψ_min", 0.0)))
+    ψ_max    = Float64(getg("psi_max", getg("ψ_max", 1.0)))
+    ψ_data   = getg("psi_data", getg("ψ_data", ""))          # expect a table-like or vector
+    ψ_column = getg("psi_column", getg("ψ_column", "psi"))        # col name or index for ψ
+    ψ_weight = getg("psi_weight", getg("ψ_weight", nothing))  # optional
 
     # build ψ grid via KDE
     ψ_grid, ψ_pdf, ψ_cdf = fit_kde_psi(
@@ -161,12 +135,12 @@ function create_primitives_from_yaml(yaml_file::String)
         boundary = (ψ_min, ψ_max)
     )
 
-    # h-grid (Beta on [h_min, h_max])
-    aₕ = Float64(mp["a_h"])
-    bₕ = Float64(mp["b_h"])
-    n_h   = Int(mg["n_h"])
-    h_min = Float64(mg["h_min"])
-    h_max = Float64(mg["h_max"])
+    # h-grid (Beta on [h_min, h_max]) - ALSO HANDLE UNICODE/ASCII
+    aₕ = Float64(getp("a_h", getp("aₕ", 2.0)))
+    bₕ = Float64(getp("b_h", getp("bₕ", 5.0)))
+    n_h   = Int(getg("n_h", 101))
+    h_min = Float64(getg("h_min", 0.05))
+    h_max = Float64(getg("h_max", 1.0))
     h_grid   = collect(range(h_min, h_max; length=n_h))
     h_scaled = (h_grid .- h_min) ./ (h_max - h_min)        # map to [0,1]
     beta_dist = Beta(aₕ, bₕ)
@@ -175,11 +149,11 @@ function create_primitives_from_yaml(yaml_file::String)
     h_cdf     = cumsum(h_pdf)
     h_cdf /= h_cdf[end]                              # ensure exact 1.0
 
-    prim = validated_Primitives(; A₀=A0, A₁=A1, ψ₀=psi0, ϕ=phi, ν=nu, c₀=c0,
-        χ=chi, γ₀=gamma0, γ₁=gamma1, k=k, z_dist=Gamma(k, 1.0),
-        κ₀=κ0, κ₁=κ1, β=β, δ=δ, b=b, ξ=ξ,
-        n_ψ=n_ψ, ψ_min=ψ_min, ψ_max=ψ_max, ψ_grid=ψ_grid, ψ_pdf=ψ_pdf, ψ_cdf=ψ_cdf,
-        aₕ=aₕ, bₕ=bₕ, n_h=n_h, h_min=h_min, h_max=h_max, h_grid=h_grid, h_pdf=h_pdf, h_cdf=h_cdf)
+    prim = validated_Primitives(; 
+                                A₀=A₀, A₁=A₁, ψ₀=ψ₀, ϕ=ϕ, ν=ν, c₀=c₀, χ=χ, γ₀=γ₀, γ₁=γ₁, μ=μ, κ₀=κ₀, κ₁=κ₁, β=β, δ=δ, b=b, ξ=ξ,
+                                n_ψ=n_ψ, ψ_min=ψ_min, ψ_max=ψ_max, ψ_grid=ψ_grid, ψ_pdf=ψ_pdf, ψ_cdf=ψ_cdf,
+                                aₕ=aₕ, bₕ=bₕ, n_h=n_h, h_min=h_min, h_max=h_max, h_grid=h_grid, h_pdf=h_pdf, h_cdf=h_cdf
+                                )
 
     return prim
 end
@@ -187,4 +161,97 @@ function initializeModel(yaml_file::String)
     prim = create_primitives_from_yaml(yaml_file)
     res = Results(prim)
     return prim, res
+end
+
+#?=========================================================================================
+#? Helper Functions
+#?=========================================================================================
+"""
+    fit_kde_psi(data_path::AbstractString, data_col::AbstractString;
+                weights_col::AbstractString = "",
+                num_grid_points::Int = 100,
+                bandwidth::Union{Nothing, Real} = nothing,
+                boundary::Union{Nothing, Tuple{<:Real, <:Real}} = nothing)
+
+Construct a KDE-based discretized distribution for ψ from a CSV file.
+
+Arguments
+- data_path: Path to CSV file with ψ data.
+- data_col: Column name in the CSV containing ψ values.
+- weights_col: Optional column name with observation weights (defaults to equal weights).
+- num_grid_points: Number of points in the returned grid (default 100).
+- bandwidth: Optional kernel bandwidth; if not provided, uses Silverman's rule (weighted).
+- boundary: Optional (min, max) tuple to bound the grid; defaults to data range.
+
+Returns
+- (ψ_grid::Vector{Float64}, ψ_pdf::Vector{Float64}, ψ_cdf::Vector{Float64})
+
+Implementation details
+- Uses a weighted Gaussian kernel: K(u) = (2π)^(-1/2) exp(-u^2/2).
+- Bandwidth h via Silverman: h = 1.06 * σ * n_eff^(-1/5),
+  where σ is the weighted std and n_eff = (∑w)^2 / ∑w^2.
+- Discrete pdf is normalized to sum to 1, and cdf is its cumulative sum.
+"""
+function fit_kde_psi(data_path::AbstractString, data_col::AbstractString;
+                        weights_col::AbstractString = "",
+                        num_grid_points::Int = 100,
+                        bandwidth::Union{Nothing, Real} = nothing,
+                        boundary::Union{Nothing, Tuple{<:Real, <:Real}} = nothing)
+
+    # Load data
+    df = CSV.read(data_path, DataFrame)
+    ψ = Float64.(df[!, data_col])
+    weights = weights_col == "" ? ones(Float64, length(ψ)) : Float64.(df[!, weights_col])
+    @assert length(ψ) == length(weights) "ψ and weights must have the same length"
+
+    # Boundaries for the grid
+    if boundary === nothing
+        min_x = minimum(ψ)
+        max_x = maximum(ψ)
+        if min_x == max_x
+            # Expand degenerate range slightly to avoid zero-length grid
+            ϵ = max(abs(min_x), 1.0) * 1e-6
+            min_x -= ϵ; max_x += ϵ
+        end
+    else
+        min_x, max_x = boundary
+    end
+
+    # Construct grid
+    ψ_grid = collect(range(min_x, max_x; length = num_grid_points))
+
+    # Weighted statistics for bandwidth
+    W = sum(weights)
+    μ = sum(weights .* ψ) / W
+    σ2 = sum(weights .* (ψ .- μ).^2) / W
+    σ = sqrt(max(σ2, eps()))
+    n_eff = (W^2) / sum(weights .^ 2)
+    h = bandwidth === nothing ? 1.06 * σ * n_eff^(-1/5) : float(bandwidth)
+    h = max(h, 1e-12)
+
+    inv_norm = 1.0 / (h * sqrt(2π) * W)
+
+    # Evaluate weighted Gaussian KDE on the grid
+    ψ_pdf = similar(ψ_grid, Float64)
+    @inbounds for j in eachindex(ψ_grid)
+        x = ψ_grid[j]
+        s = 0.0
+        for i in eachindex(ψ)
+            z = (x - ψ[i]) / h
+            s += weights[i] * exp(-0.5 * z * z)
+        end
+        ψ_pdf[j] = inv_norm * s
+    end
+
+    # Discrete normalization to ensure sum(ψ_pdf) == 1 on the grid
+    total = sum(ψ_pdf)
+    if !(total > 0)
+        # Fallback: place mass uniformly if density is numerically degenerate
+        fill!(ψ_pdf, 1.0 / length(ψ_pdf))
+    else
+        @. ψ_pdf = ψ_pdf / total
+    end
+
+    ψ_cdf = cumsum(ψ_pdf)
+    return ψ_grid, ψ_pdf, ψ_cdf
 end

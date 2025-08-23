@@ -1,6 +1,6 @@
 using Pkg
 # activate project containing Project.toml (adjust path if needed)
-Pkg.activate(joinpath(@__DIR__, "../.."))
+Pkg.activate("../../..")
 Pkg.instantiate()
 
 using Distributed
@@ -44,7 +44,7 @@ p = (
     param_names = params_to_estimate,
     weighting_matrix = nothing,
     matrix_moment_order = nothing,
-    solver_state_init = (λ_S_init = 0.1, λ_u_init = 0.1),
+    solver_state = Ref((λ_S_init = 0.1, λ_u_init = 0.1)),  
 );
 
 # Settings for the grid around the true value
@@ -56,7 +56,7 @@ rel_width = 0.2
 grids = [range(param * (1 - rel_width), param * (1 + rel_width), n_grid) for param in θ0]
 
 # Ship immutable inputs to workers once
-@everywhere const P_OBJ = $p
+@everywhere const POBJ = $p
 @everywhere const THETA0 = $θ0
 
 # Worker-side evaluation for one parameter's grid
@@ -65,7 +65,7 @@ grids = [range(param * (1 - rel_width), param * (1 + rel_width), n_grid) for par
     θ = copy(THETA0)
     for j in eachindex(grid)
         θ[i] = grid[j]
-        fvals[j] =  objective_function(θ, P_OBJ)
+        fvals[j] =  objective_function(θ, POBJ)
     end
     return fvals
 end
@@ -135,7 +135,7 @@ rel_width = 0.01
 grids_problem = [range(param * (1 - rel_width), param * (1 + rel_width), n_grid) for param in θ0_problem]
 
 # Ship immutable inputs to workers once
-@everywhere const P_OBJ_new = $p
+@everywhere const POBJ_new = $p
 @everywhere const THETA0_new = $θ0_problem
 
 # Define a distinct worker function that uses the problematic grids
@@ -144,7 +144,7 @@ grids_problem = [range(param * (1 - rel_width), param * (1 + rel_width), n_grid)
     θ = copy(THETA0_new)
     for j in eachindex(grid)
         θ[i] = grid[j]
-        fvals[j] = objective_function(θ, P_OBJ_new)
+        fvals[j] = objective_function(θ, POBJ_new)
     end
     return fvals
 end

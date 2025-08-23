@@ -232,33 +232,33 @@ function create_primitives_from_yaml(yaml_file::String)
     model_grids      = config["ModelGrids"]
 
     # Scalars (coerce to Float64)
-    κ₀  = f64(model_parameters["kappa0"])
-    κ₁  = f64(model_parameters["kappa1"])
-    β   = f64(model_parameters["beta"])
-    δ   = f64(model_parameters["delta"])
+    κ₀  = f64(model_parameters["κ₀"])
+    κ₁  = f64(model_parameters["κ₁"])
+    β   = f64(model_parameters["β"])
+    δ   = f64(model_parameters["δ"])
     b   = f64(model_parameters["b"])
-    ξ   = f64(model_parameters["xi"])
+    ξ   = f64(model_parameters["ξ"])
 
-    A₀  = f64(model_parameters["A0"])
-    A₁  = f64(model_parameters["A1"])
-    ψ₀  = f64(model_parameters["psi_0"])
-    ϕ   = f64(model_parameters["phi"])
-    ν   = f64(model_parameters["nu"])
-    c₀  = f64(model_parameters["c0"])
-    χ   = f64(model_parameters["chi"])
-    γ₀  = f64(model_parameters["gamma0"])
-    γ₁  = f64(model_parameters["gamma1"])
+    A₀  = f64(model_parameters["A₀"])
+    A₁  = f64(model_parameters["A₁"])
+    ψ₀  = f64(model_parameters["ψ₀"])
+    ϕ   = f64(model_parameters["ϕ"])
+    ν   = f64(model_parameters["ν"])
+    c₀  = f64(model_parameters["c₀"])
+    χ   = f64(model_parameters["χ"])
+    γ₀  = f64(model_parameters["γ₀"])
+    γ₁  = f64(model_parameters["γ₁"])
 
-    aₕ  = f64(model_parameters["a_h"])
-    bₕ  = f64(model_parameters["b_h"])
+    aₕ  = f64(model_parameters["aₕ"])
+    bₕ  = f64(model_parameters["bₕ"])
 
     # ψ-grid inputs
-    n_ψ      = iint(model_grids["n_psi"])
-    ψ_min    = f64(model_grids["psi_min"])
-    ψ_max    = f64(model_grids["psi_max"])
-    ψ_data   = model_grids["psi_data"]          # expect a table-like or vector
-    ψ_column = model_grids["psi_column"]        # col name or index for ψ
-    ψ_weight = get(model_grids, "psi_weight", nothing)  # optional
+    n_ψ      = iint(model_grids["n_ψ"])
+    ψ_min    = f64(model_grids["ψ_min"])
+    ψ_max    = f64(model_grids["ψ_max"])
+    ψ_data   = model_grids["ψ_data"]          # expect a table-like or vector
+    ψ_column = model_grids["ψ_column"]        # col name or index for ψ
+    ψ_weight = get(model_grids, "ψ_weight", nothing)  # optional
 
     # build ψ grid via KDE
     ψ_grid, ψ_pdf, ψ_cdf = fit_kde_psi(

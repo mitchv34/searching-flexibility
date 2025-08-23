@@ -3,6 +3,9 @@
 api_keys.json
 
 # Folders to exclude
+src/structural_model_heterogenous_preferences/distributed_mpi_search/figures
+src/structural_model_heterogenous_preferences/distributed_mpi_search/output
+
 
 # Logs 
 logs/

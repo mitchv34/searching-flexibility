@@ -1,0 +1,301 @@
+# IPUMS unified acquisition configuration
+#
+# This configuration controls what to download from IPUMS for ACS, CPS, and ATUS,
+# which years to include, where to save data, and how to authenticate.
+# The unified script reads this file: src/empirical/ipums_acquire.py
+#
+# Notes:
+# - API key can be provided directly (api_key), via a JSON (api_key_path + api_key_json_field),
+#   or via environment variable IPUMS_API_KEY. If multiple are set, priority is: api_key > api_key_path > env.
+# - Years: use start: 2013 and end: present to fetch through the current year.
+# - Samples: If omitted, sensible defaults are used per dataset (see sample_pattern). You can also
+#   provide an explicit list of samples if you need Monthly CPS, etc.
+# - Variables: Keep only what downstream processing uses to reduce payload.
+#
+# Paths where data will be saved
+paths:
+  # Raw microdata outputs go here (ACS/CPS). Subfolders per dataset will be created.
+  raw_dir: data/raw
+  # Processed outputs (ATUS summaries) go here.
+  processed_dir: data/processed
+  # Auxiliar datasets directories (e.g. crosswalks, mappings)
+  aux_dir: data/aux
+
+# General authentication settings
+authentication:
+  # Path to a JSON file containing API keys
+  api_key_path: api_keys.json
+  # Name of the field in the JSON that contains the API key for IPUMS
+  ipums_api_key_field: ipums
+
+# IPUMS API authentication
+ipums:
+  # Provide your API key here (optional if using authentication.api_key_path or env var)
+  api_key: null
+
+# Datasets to acquire
+# Enable/disable and configure each dataset independently.
+datasets:
+  atus:
+    enabled: false
+    collection: atus
+
+    # Years to download; 'present' extends to this year.
+    years:
+      start: 2013
+      end: 2024
+
+    # Variables required for remote work identification and CPS linkage.
+    # Only the essential variables used in ipums_process.py
+    variables:
+      - YEAR
+      - CPSIDP
+      - WHERE
+      - ACTIVITY
+      - DURATION
+      - DATE
+      - HOLIDAY
+      - WT06
+
+    # Pattern for ATUS samples
+    sample_pattern: "at{year}"
+
+    # Limit samples per extract to avoid oversized requests
+    max_samples_per_extract: 8
+
+    # Output filename in data/raw/atus/
+    output_filename: atus_{start_year}_{final_year}
+
+  acs:
+    enabled: false
+    collection: usa  # IPUMS USA (ACS)
+
+    years:
+      start: 2013
+      end: 2023
+
+    # Variables used by ipums_process.py for ACS pipeline
+    variables:
+      - YEAR
+      - STATEFIP
+      - PUMA
+      - PERWT
+      - AGE
+      - SEX
+      - RACE
+      - HISPAN
+      - EDUC
+      - CLASSWKR
+      - INDNAICS
+      - OCCSOC
+      - TRANWORK
+      - TRANTIME
+      - INCWAGE
+      - UHRSWORK
+      - INCTOT
+
+    # IPUMS 1-year ACS sample pattern
+    sample_pattern: "us{year}a"
+
+    max_samples_per_extract: 6
+
+    # Output filename in data/raw/acs/
+    output_filename: acs_{start_year}_{final_year}
+
+  cps:
+    enabled: false  # Single large extract covering full period 2013-2025
+    collection: cps
+
+    years:
+      start: 2013
+      end: 2025
+
+    # Optional: specify specific months (1-12). If omitted, all 12 months used.
+    months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]  # All months - will be validated against IPUMS
+    # months: [3]  # March only - most consistently available
+    # months: [3, 6, 9, 12]  # Quarterly samples
+    
+    # Sample pattern for Basic Monthly CPS (will be auto-generated)
+    sample_pattern: "cps{year}_{month:02d}b"
+
+    # 13 years * 12 months = 156 samples, set to 200 for safety
+    max_samples_per_extract: 200
+
+    # Variables needed for CPS processing - essential ones plus telework variables
+    # Note: TELWRKPAY and TELWRKHR only available from 2022 onwards (will be NULL for earlier years)
+    variables:
+      - YEAR
+      - SERIAL
+      - MONTH
+      - MISH
+      - CPSIDP
+      - STATEFIP
+      - PERNUM
+      - WTFINL
+      - CPSIDP
+      - CPSIDV
+      - AGE
+      - SEX
+      - RACE
+      - HISPAN
+      - OCC
+      - IND
+      - CLASSWKR
+      - UHRSWORKT
+      - EDUC
+      - EARNWEEK2
+      - HOURWAGE2
+      - TELWRKPAY  # Only available from 2022 (NULL for 2013-2021)
+      - TELWRKHR   # Only available from 2022 (NULL for 2013-2021)
+
+    output_filename: cps_{start_year}_{final_year}
+
+# Crosswalks and mapping specifications
+crosswalks:
+  # Industry: CPS IND -> NAICS
+  cps_industry:
+    path: ${paths.aux_dir}/cw_ind_naics.csv
+    map:
+      # source is the column in CPS data, target is the column in crosswalk to map to
+      source_column: IND
+      crosswalk_key: IND
+      target_column: definitive
+    output_column: INDNAICS
+  # SOC structure / aggregator for 2018 SOC
+  soc_aggregator:
+    path: ${paths.aux_dir}/soc_structure_2018.xlsx
+  # CPS OCC -> SOC crosswalk
+  cps_occ_to_soc:
+    path: ${paths.aux_dir}/OCC_SOC_CW.csv
+    map:
+      source_column: OCC
+      crosswalk_key: OCC
+      target_column: SOC
+  # ACS PUMA -> CBSA
+  puma_to_cbsa:
+    path: ${paths.aux_dir}/puma_to_cbsa.csv
+    map:
+      source_column: state_puma
+      crosswalk_key: state_puma
+      target_column: cbsa20
+  # State FIPS -> census division and name
+  state_censusdiv:
+    path: ${paths.aux_dir}/state_census_divisions.csv
+    map:
+      fips_to_div:
+        source_column: state_fips
+        crosswalk_key: state_fips
+        target_column: censusdiv
+      fips_to_name:
+        source_column: state_fips
+        crosswalk_key: state_fips
+        target_column: state_name
+  # Teleworkability index by SOC detailed
+  teleworkability:
+    path: ${paths.aux_dir}/wfh_estimates.csv
+    map:
+      source_column: OCCSOC_detailed
+      crosswalk_key: OCC_CODE
+      target_column: ESTIMATE_WFH_ABLE
+
+# SIPP (Census FTP) acquisition settings
+sipp:
+  enabled: true
+
+  ftp:
+    host: ftp2.census.gov
+    base_path: programs-surveys/sipp/data/datasets
+
+  # Choose either explicit list or start/end
+  years:
+    # Uncomment to drive via explicit list
+    # list: [2018, 2019, 2020, 2021, 2022, 2023, 2024]
+    start: 2018
+    end: 2024
+
+  # Variables to load from primary (pu) file (weights from rw auto‑added via REPWGT*)
+  variables:
+    # Person identifiers
+    - PNUM # Person Id
+    - SSUID # Sample unit identifier. This identifier is created by scrambling together PSU, Sequence #1, Sequence #2, and the Frame Indicator for a case. It may be used in matching sample units from different waves.
+    - SPANEL # Panel year
+    - MONTHCODE # Reference month
+    - SWAVE # Wave number of interview
+    - RIN_UNIV # Monthly indicator that respondent is in survey frame universe
+    # Additional identifiers
+    - SHHADID # Household identifier at the time of interview. Differentiates households spawned from the same sample unit
+    - EMAIN_JOB # Main‑job indicator; identifies which job is considered the main job when multiple jobs are reported
+
+    # Job info (1st job)
+    - EJB1_JOBID
+    - TJB1_OCC
+    - TJB1_IND
+    - EJB1_CLWRK
+    - EJB1_JBORSE
+    - TJB1_MSUM
+    - TJB1_MWKHRS
+
+    # Job identifiers and labor‑force variables for all jobs (there are up to 7 jobs in SIPP)
+    # For i = 1..7, include the following patterns:
+    - EJB{i}_JOBID # Unique job identifier for job i; consistent across waves
+    - EJB{i}_JBORSE # Work arrangement for job i (wage/salary, self‑employed, other)
+    - EJB{i}_CLWRK # Class of worker for job i (government, private, self‑employed, etc.)
+    - TJB{i}_OCC # Detailed SOC occupation code for job i
+    - TJB{i}_IND # Detailed NAICS industry code for job i
+    - TJB{i}_MWKHRS # Average hours worked per week at job i during the reference month
+    - EJB{i}_DYSWKD # Number of days worked per week at job i (1–7)
+    - EJB{i}_DYSWKDH # Number of days worked only at home for job i (0–7)
+    - EJB{i}_CHHOUR1 # Indicator for first change in hours worked per week at job i
+    - EJB{i}_CHHOUR2 # Indicator for second change in hours worked per week at job i
+    - TJB{i}_JOBHRS1 # Initial hours worked per week within job i
+    - TJB{i}_JOBHRS2 # Second hours value when hours changed once within job i
+    - TJB{i}_JOBHRS3 # Third hours value when hours changed twice within job i
+    - TJB{i}_WKHRS1 # Hours worked in week 1 at job i (actual hours)
+    - TJB{i}_WKHRS2 # Hours worked in week 2 at job i
+    - TJB{i}_WKHRS3 # Hours worked in week 3 at job i
+    - TJB{i}_WKHRS4 # Hours worked in week 4 at job i
+    - TJB{i}_WKHRS5 # Hours worked in week 5 at job i (months with five weeks)
+
+    # Telework & work‑from‑home indicators for each job i (1..7)
+    - EJB{i}_PVWKTR9 # Indicator (1 = yes, 2 = no) that respondent worked from home during the reference week
+    - EJB{i}_WSHMWRK # Indicator that any days were worked only from home at job i
+    - EJB{i}_WSHMMON # Whether the respondent worked from home on Mondays at job i
+    - EJB{i}_WSHMTUE # Worked from home on Tuesdays
+    - EJB{i}_WSHMWED # Worked from home on Wednesdays
+    - EJB{i}_WSHMTHU # Worked from home on Thursdays
+    - EJB{i}_WSHMFRI # Worked from home on Fridays
+    - EJB{i}_WSHMSAT # Worked from home on Saturdays
+    - EJB{i}_WSHMSUN # Worked from home on Sundays
+
+    # Weekly and monthly employment status recodes
+    - RWKESR1 # Weekly employment status recode for week 1 (employed, absent, unemployed, etc.)
+    - RWKESR2 # Weekly employment status recode for week 2
+    - RWKESR3 # Weekly employment status recode for week 3
+    - RWKESR4 # Weekly employment status recode for week 4
+    - RWKESR5 # Weekly employment status recode for week 5 (if applicable)
+    - RMESR   # Monthly employment status recode (employed all month, absent, unemployed, not in labor force)
+
+    # Replicate‑weight codes for variance estimation
+    - GVARSTR # Variance pseudo‑stratum code used for replicate‑weight calculation
+    - GHLFSAM # Half‑sample code used for replicate weights
+
+    # Demographics
+    - TAGE
+    - TAGE_EHC
+    - ESEX
+    - ERACE
+    - EEDUC
+    - EORIGIN
+    - TPTOTINC
+    - RTANF_MNYN
+
+    # Person weight
+    - WPFINWGT
+
+  # Merge keys for PU<->RW
+  merge_keys: [SSUID, PNUM, MONTHCODE]
+
+  # Parallelism and outputs
+  max_workers: 10
+  save_parquet: false
+  output_basename: "sipp_{year}"
