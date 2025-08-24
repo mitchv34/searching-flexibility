@@ -115,7 +115,8 @@ submit_job() {
         print_status "✓ Job submitted successfully"
         print_highlight "Job ID: $job_id"
         print_status "Monitor with: squeue -j $job_id"
-        print_status "View logs: tail -f $LOGS_DIR/mpi_search_${job_id}.out"
+        print_status "Enhanced monitoring: $0 monitor $job_id"
+        print_status "View live logs: $0 logs $job_id"
         
         # Save job ID for later reference
         echo "$job_id" > "$MPI_SEARCH_DIR/.last_job_id"
@@ -126,39 +127,36 @@ submit_job() {
     fi
 }
 
-# Function to monitor job status
+# Function to monitor job status with enhanced monitoring
 monitor_job() {
     if [[ -n "$1" ]]; then
         job_id="$1"
     elif [[ -f "$MPI_SEARCH_DIR/.last_job_id" ]]; then
         job_id=$(cat "$MPI_SEARCH_DIR/.last_job_id")
     else
-        print_error "No job ID provided and no previous job found"
-        exit 1
+        job_id=""  # Monitor any job if none specified
     fi
     
-    print_header "Monitoring Job $job_id"
+    print_header "Enhanced MPI Search Monitoring"
     
-    # Show job status
-    squeue -j "$job_id" 2>/dev/null || {
-        print_status "Job $job_id not found in queue (may have completed)"
-        
-        # Check if job has output files
-        out_file="$LOGS_DIR/mpi_search_${job_id}.out"
-        err_file="$LOGS_DIR/mpi_search_${job_id}.err"
-        
-        if [[ -f "$out_file" ]]; then
-            print_status "Output file exists: $out_file"
-            echo "Last 20 lines:"
-            tail -20 "$out_file"
-        fi
-        
-        if [[ -f "$err_file" ]] && [[ -s "$err_file" ]]; then
-            print_warning "Error file has content: $err_file"
-            echo "Last 10 lines:"
-            tail -10 "$err_file"
-        fi
-    }
+    # First show SLURM job status if job_id available
+    if [[ -n "$job_id" ]]; then
+        print_status "Checking SLURM status for job $job_id..."
+        squeue -j "$job_id" 2>/dev/null || {
+            print_status "Job $job_id not found in queue (may have completed)"
+        }
+        echo
+    fi
+    
+    # Use enhanced monitoring script
+    print_status "🚀 Launching enhanced monitoring..."
+    cd "$MPI_SEARCH_DIR" || exit 1
+    
+    if [[ -n "$job_id" ]]; then
+        julia --project="$PROJECT_ROOT" enhanced_monitoring.jl "$job_id"
+    else
+        julia --project="$PROJECT_ROOT" enhanced_monitoring.jl
+    fi
 }
 
 # Function to view live logs
@@ -203,15 +201,35 @@ cancel_job() {
     fi
 }
 
-# Function to analyze results
+# Function to run enhanced analysis
+enhanced_analysis() {
+    if [[ -n "$1" ]]; then
+        job_id="$1"
+    else
+        job_id=""  # Analyze latest if none specified
+    fi
+    
+    print_header "Enhanced MPI Search Analysis"
+    
+    cd "$MPI_SEARCH_DIR" || exit 1
+    
+    print_status "🎨 Running comprehensive analysis with publication-quality plots..."
+    if [[ -n "$job_id" ]]; then
+        julia --project="$PROJECT_ROOT" advanced_analysis.jl "$job_id"
+    else
+        julia --project="$PROJECT_ROOT" advanced_analysis.jl
+    fi
+}
+
+# Function to analyze results (quick analysis)
 analyze_results() {
-    print_header "Analyzing MPI Search Results"
+    print_header "Quick MPI Search Results Summary"
     
     # Find most recent results file
-    latest_result=$(find "$OUTPUT_DIR" -name "mpi_search_results_*.json" -type f -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
+    latest_result=$(find "$MPI_SEARCH_DIR/output/results" -name "*.json" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
     
     if [[ -n "$latest_result" ]]; then
-        print_status "Latest results file: $latest_result"
+        print_status "Latest results file: $(basename "$latest_result")"
         
         # Use Julia to analyze results
         cd "$MPI_SEARCH_DIR" || exit 1
@@ -220,15 +238,27 @@ analyze_results() {
             results = JSON3.read(read(\"$latest_result\", String))
             println(\"📊 SEARCH RESULTS SUMMARY\")
             println(\"=========================\")
-            println(\"Best objective value: \", results.best_objective)
-            println(\"Best parameters: \", results.best_params)
-            println(\"Total evaluations: \", length(results.all_objectives))
-            println(\"Workers used: \", results.n_workers)
-            println(\"Elapsed time: \", round(results.elapsed_time, digits=2), \" seconds\")
-            println(\"Evaluations per second: \", round(length(results.all_objectives) / results.elapsed_time, digits=2))
+            if haskey(results, :best_objective)
+                println(\"Best objective value: \", results.best_objective)
+            end
+            if haskey(results, :best_params)
+                println(\"Best parameters: \", results.best_params)
+            end
+            if haskey(results, :all_objectives)
+                println(\"Total evaluations: \", length(results.all_objectives))
+            end
+            if haskey(results, :n_workers)
+                println(\"Workers used: \", results.n_workers)
+            end
+            if haskey(results, :elapsed_time)
+                println(\"Elapsed time: \", round(results.elapsed_time, digits=2), \" seconds\")
+                if haskey(results, :all_objectives)
+                    println(\"Evaluations per second: \", round(length(results.all_objectives) / results.elapsed_time, digits=2))
+                end
+            end
         "
     else
-        print_warning "No results files found in $OUTPUT_DIR"
+        print_warning "No results files found in $MPI_SEARCH_DIR/output/results"
     fi
 }
 
@@ -254,11 +284,12 @@ show_help() {
     echo
     echo "Commands:"
     echo "  submit              Submit MPI search job to SLURM"
-    echo "  monitor [JOB_ID]    Monitor job status"
-    echo "  logs [JOB_ID]       View live logs"
+    echo "  monitor [JOB_ID]    Enhanced real-time monitoring with progress tracking"
+    echo "  logs [JOB_ID]       View live SLURM logs"
     echo "  cancel [JOB_ID]     Cancel running job"
     echo "  status              Show current configuration and status"
-    echo "  analyze             Analyze latest results"
+    echo "  analyze             Quick results summary"
+    echo "  plots [JOB_ID]      Generate comprehensive analysis plots"
     echo "  cleanup             Clean up old files"
     echo "  help                Show this help message"
     echo
@@ -267,9 +298,17 @@ show_help() {
     echo
     echo "Examples:"
     echo "  $0 submit                    # Submit new MPI search job"
-    echo "  $0 monitor 123456           # Monitor specific job"
+    echo "  $0 monitor 123456           # Enhanced monitoring for specific job"
+    echo "  $0 monitor                  # Monitor latest job automatically"
+    echo "  $0 plots                    # Generate publication-quality analysis plots"
     echo "  $0 logs                     # View logs of last submitted job"
     echo "  CONFIG_FILE=test.yaml $0 submit  # Use custom config file"
+    echo
+    echo "Enhanced Features:"
+    echo "  • Real-time progress tracking with ETA estimates"
+    echo "  • Publication-quality diagnostic plots"
+    echo "  • Automatic job ID detection"
+    echo "  • Comprehensive performance analysis"
 }
 
 # Main script logic
@@ -292,6 +331,9 @@ main() {
             ;;
         "analyze")
             analyze_results
+            ;;
+        "plots")
+            enhanced_analysis "$2"
             ;;
         "cleanup")
             cleanup

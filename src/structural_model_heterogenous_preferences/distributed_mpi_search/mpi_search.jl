@@ -91,6 +91,106 @@ function sanitize_nan_values(data)
     end
 end
 
+# Helper function to clean up old results and logs
+function cleanup_old_results()
+    """
+    Clean up old results and logs from previous jobs before starting a new run
+    """
+    println("🧹 Cleaning up old results and logs...")
+    
+    # Clean results directory - remove files from other jobs
+    results_dir = joinpath(MPI_SEARCH_DIR, "output", "results")
+    if isdir(results_dir)
+        old_files = readdir(results_dir)
+        for file in old_files
+            # Only remove JSON files that are NOT from the current job
+            if endswith(file, ".json") && !contains(file, "job$(JOB_ID)")
+                rm(joinpath(results_dir, file))
+                println("  Removed old result from different job: $file")
+            end
+        end
+    end
+    
+    # Clean logs directory - remove SLURM output files from other jobs
+    logs_dir = joinpath(MPI_SEARCH_DIR, "output", "logs")
+    if isdir(logs_dir)
+        old_files = readdir(logs_dir)
+        for file in old_files
+            # Keep submit scripts and monitoring logs, remove SLURM output files from other jobs only
+            if (endswith(file, ".out") || endswith(file, ".err")) && !contains(file, JOB_ID)
+                try
+                    rm(joinpath(logs_dir, file))
+                    println("  Removed old log from different job: $file")
+                catch
+                    # Ignore if file is locked or doesn't exist
+                end
+            end
+        end
+    end
+    
+    println("✅ Cleanup completed")
+end
+
+# Helper function to clean up intermediate snapshots
+function cleanup_intermediate_snapshots()
+    """
+    Remove all intermediate snapshots except the latest one after completion
+    """
+    println("🧹 Cleaning up intermediate snapshots...")
+    
+    results_dir = joinpath(MPI_SEARCH_DIR, "output", "results")
+    if isdir(results_dir)
+        all_files = readdir(results_dir)
+        # Find intermediate files for this job (with timestamps, not final or latest)
+        intermediate_files = filter(f -> 
+            contains(f, "job$(JOB_ID)") && 
+            endswith(f, ".json") && 
+            !endswith(f, "_final.json") && 
+            !endswith(f, "_latest.json") &&
+            occursin(r"_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.json$", f), all_files)
+        
+        # Sort by timestamp (extract timestamp from filename for proper chronological ordering)
+        if length(intermediate_files) > 1
+            # Extract timestamps and sort chronologically
+            file_timestamps = []
+            for file in intermediate_files
+                # Extract timestamp from filename like: mpi_search_results_jobXXX_2025-08-23_10-15-00.json
+                timestamp_match = match(r"(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})", file)
+                if timestamp_match !== nothing
+                    timestamp_str = timestamp_match.captures[1]
+                    # Convert to DateTime for proper sorting
+                    timestamp = DateTime(timestamp_str, "yyyy-mm-dd_HH-MM-SS")
+                    push!(file_timestamps, (file, timestamp))
+                end
+            end
+            
+            # Sort by timestamp (most recent last)
+            sort!(file_timestamps, by=x -> x[2])
+            
+            # Remove all but the most recent
+            files_to_remove = [ft[1] for ft in file_timestamps[1:end-1]]
+            
+            for file in files_to_remove
+                try
+                    rm(joinpath(results_dir, file))
+                    println("  Removed intermediate snapshot: $file")
+                catch
+                    # Ignore if file is locked or doesn't exist
+                end
+            end
+            
+            if !isempty(files_to_remove)
+                latest_kept = file_timestamps[end][1]
+                println("✅ Kept only the latest intermediate snapshot: $latest_kept")
+            else
+                println("✅ No intermediate snapshots to clean")
+            end
+        else
+            println("✅ No intermediate snapshots to clean (≤1 file found)")
+        end
+    end
+end
+
 println("✓ Model loaded on all workers")
 
 # --- 4. Load Configuration ---
@@ -198,6 +298,34 @@ else
     @everywhere CONFIG_FILE_PATH = $config_file
 end
 
+# --- Test worker setup ---
+println("\n🔧 Testing worker setup...")
+test_params = Dict("beta" => 0.96, "eta" => 0.5)
+println("Running test evaluation on worker 1 with params: $test_params")
+
+if nworkers() > 0
+    try
+        # Test evaluation on first worker
+        test_result = remotecall_fetch(evaluate_objective_function, workers()[1], test_params)
+        println("✅ Test evaluation successful: objective = $(test_result[1])")
+        if test_result[1] >= 7e9
+            println("⚠️  Test evaluation returned error penalty - investigating worker issues...")
+        end
+    catch e
+        println("❌ Test evaluation failed: $e")
+        println("This suggests worker setup issues that need to be resolved before proceeding.")
+    end
+else
+    # Test on main process
+    try
+        test_result = evaluate_objective_function(test_params)
+        println("✅ Test evaluation successful on main process: objective = $(test_result[1])")
+    catch e
+        println("❌ Test evaluation failed on main process: $e")
+    end
+end
+println("Worker setup test completed.\n")
+
 # --- 5. Define objective function on all workers ---
 @everywhere function evaluate_objective_function(params::Dict{String, Float64})
     """
@@ -210,62 +338,158 @@ end
     Returns: (objective_value, model_moments_dict)
     """
     try
-        # Use the MPI search config file directly (it contains all needed parameters)
+        println("🔍 Starting evaluation with params: $params")
+        println("🔧 Worker ID: $(myid()), PID: $(getpid())")
+        println("📁 Current working directory: $(pwd())")
+        
+        # Debug: Check if all variables are defined
+        println("🔍 Checking worker environment...")
+        println("  CONFIG_FILE_PATH defined: $(isdefined(Main, :CONFIG_FILE_PATH))")
+        println("  TARGET_MOMENTS defined: $(isdefined(Main, :TARGET_MOMENTS))")
+        println("  MOMENT_WEIGHTS defined: $(isdefined(Main, :MOMENT_WEIGHTS))")
+        
+        if isdefined(Main, :CONFIG_FILE_PATH)
+            println("  CONFIG_FILE_PATH value: $(CONFIG_FILE_PATH)")
+        else
+            println("❌ CONFIG_FILE_PATH not defined on worker!")
+            return (7e9, Dict())
+        end
+        
+        if isdefined(Main, :TARGET_MOMENTS)
+            println("  TARGET_MOMENTS length: $(length(TARGET_MOMENTS))")
+            println("  TARGET_MOMENTS keys: $(keys(TARGET_MOMENTS))")
+        else
+            println("❌ TARGET_MOMENTS not defined on worker!")
+            return (7e9, Dict())
+        end
+        
+        # Debug: Check if functions are defined
+        println("🔍 Checking function availability...")
+        function_checks = [
+            ("initializeModel", isdefined(Main, :initializeModel)),
+            ("update_primitives_results", isdefined(Main, :update_primitives_results)),
+            ("solve_model", isdefined(Main, :solve_model)),
+            ("compute_model_moments", isdefined(Main, :compute_model_moments)),
+            ("compute_distance", isdefined(Main, :compute_distance))
+        ]
+        
+        for (func_name, is_defined) in function_checks
+            println("  $func_name: $is_defined")
+            if !is_defined
+                println("❌ Function $func_name not defined on worker!")
+                return (7e9, Dict())
+            end
+        end
+        
+        # Check if config file exists and is accessible
         base_config_file = CONFIG_FILE_PATH
+        println("📁 Using config file: $base_config_file")
+        
+        if !isfile(base_config_file)
+            println("❌ Config file not found: $base_config_file")
+            return (7e9, Dict())
+        end
+        
+        println("✓ Config file exists")
+        
+        # Check if we have target moments BEFORE proceeding
+        if length(TARGET_MOMENTS) == 0
+            println("❌ No target moments available")
+            return (9e9, Dict())  # Penalty: Missing target moments
+        end
+        
+        println("🎯 Target moments available: $(length(TARGET_MOMENTS))")
+        for (key, value) in TARGET_MOMENTS
+            println("    $key: $value")
+        end
         
         # Initialize model from base configuration
+        println("🔧 Initializing model...")
         prim_base, res_base = initializeModel(base_config_file)
+        println("✓ Model initialized successfully")
         
         # Convert string keys to symbols for model compatibility
         symbol_params = Dict(Symbol(k) => v for (k, v) in params)
+        println("🔄 Converted params to symbols: $symbol_params")
         
         # Update primitives with new parameter values using ModelEstimation function
+        println("📝 Updating primitives...")
         prim_new, res_new = update_primitives_results(
             prim_base, res_base, symbol_params
         )
-        
-        # Check if we have target moments
-        if length(TARGET_MOMENTS) == 0
-            # Return penalty with NaN moments
-            nan_moments = Dict(key => NaN for key in keys(TARGET_MOMENTS))
-            return (9e9, nan_moments)  # Penalty: Missing target moments
-        end
+        println("✓ Primitives updated successfully")
         
         # Solve the model using ModelSolver with config from file
+        println("🧮 Solving model...")
         convergence_status = solve_model(prim_new, res_new; config=base_config_file)
+        println("📊 Convergence status: $convergence_status")
         
         if convergence_status != :converged
-            # Return penalty with NaN moments for non-convergence
+            println("❌ Model did not converge")
             nan_moments = Dict(key => NaN for key in keys(TARGET_MOMENTS))
             return (8e9, nan_moments)  # Penalty: Model solver non-convergence
         end
         
+        println("✓ Model converged successfully")
+        
         # Compute model moments using ModelEstimation
-        model_moments = compute_model_moments(prim_new, res_new; include=keys(TARGET_MOMENTS))
+        println("📈 Computing model moments...")
+        moment_keys = Vector{Symbol}(collect(keys(TARGET_MOMENTS)))
+        model_moments = compute_model_moments(prim_new, res_new; include=moment_keys)
+        println("📊 Model moments computed: $model_moments")
 
         # Calculate distance using compute_distance from ModelEstimation
+        println("📏 Computing distance...")
         objective = compute_distance(
             model_moments, 
             TARGET_MOMENTS,
-            #TODO: Implement 
             nothing,  # weighting_matrix
             nothing   # matrix_moment_order
         )
+        
+        println("✅ Evaluation completed successfully. Objective: $objective")
         
         # Return both objective and moments
         return (objective, model_moments)
         
     catch e
-        # Log detailed error information
-        error_msg = "Error evaluating parameters $(params): $e"
+        # Enhanced error logging
+        println("❌ ERROR in evaluate_objective_function:")
+        println("  Worker ID: $(myid()), PID: $(getpid())")
+        println("  Exception type: $(typeof(e))")
+        println("  Exception message: $e")
+        
         if isa(e, MethodError)
-            error_msg *= "\nMethodError details: $(e.f) with args $(e.args)"
+            println("  MethodError details:")
+            println("    Function: $(e.f)")
+            println("    Arguments: $(e.args)")
+            println("    Argument types: $(typeof.(e.args))")
         elseif isa(e, UndefVarError)
-            error_msg *= "\nUndefined variable: $(e.var)"
+            println("  Undefined variable: $(e.var)")
         elseif isa(e, BoundsError)
-            error_msg *= "\nBounds error: $(e)"
+            println("  Bounds error: $(e)")
+        elseif isa(e, LoadError)
+            println("  Load error: $(e.error)")
+            println("  File: $(e.file)")
+            println("  Line: $(e.line)")
+        elseif isa(e, SystemError)
+            println("  System error: $(e.errnum) - $(e.prefix)")
         end
-        @warn error_msg
+        
+        # Print stack trace for debugging (first 15 frames)
+        println("  Stack trace:")
+        for (i, frame) in enumerate(stacktrace(catch_backtrace()))
+            println("    $i: $frame")
+            if i > 15  # Limit to prevent too much output
+                break
+            end
+        end
+        
+        # Also print current working directory and environment
+        println("  Current working directory: $(pwd())")
+        println("  CONFIG_FILE_PATH: $(get(Main, :CONFIG_FILE_PATH, "UNDEFINED"))")
+        println("  TARGET_MOMENTS length: $(length(TARGET_MOMENTS))")
+        println("  Available functions: $(filter(x -> isa(getfield(Main, x), Function), names(Main)))")
         
         # Return large penalty with NaN moments for any errors
         nan_moments = Dict(key => NaN for key in keys(TARGET_MOMENTS))
@@ -378,10 +602,10 @@ function save_intermediate_results(parameter_vectors, objective_values, model_mo
             "intermediate" => true
         )
         
-        # Save with timestamp and job ID for monitoring
-        output_dir = joinpath(MPI_SEARCH_DIR, "output")
-        mkpath(output_dir)  # Create output directory if it doesn't exist
-        output_file = joinpath(output_dir, "mpi_search_results_job$(JOB_ID)_$(Dates.format(Dates.now(), "yyyy-mm-dd_HH-MM-SS")).json")
+        # Save with timestamp and job ID for monitoring to results directory
+        results_dir = joinpath(MPI_SEARCH_DIR, "output", "results")
+        mkpath(results_dir)  # Create results directory if it doesn't exist
+        output_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_$(Dates.format(Dates.now(), "yyyy-mm-dd_HH-MM-SS")).json")
         open(output_file, "w") do f
             JSON3.pretty(f, intermediate_results)
         end
@@ -470,6 +694,9 @@ function run_mpi_search(config::Dict)
     Main distributed search function using validated configuration
     """
     println("\n🔍 Starting parameter search...")
+    
+    # Clean up old results and logs before starting
+    cleanup_old_results()
     
     # Get number of samples from config and ensure it's an integer
     if haskey(config, "optimization")
@@ -592,7 +819,7 @@ function run_mpi_search(config::Dict)
     end
     
     # Save final results - sanitize all NaN values for JSON compatibility
-    results = Dict(
+    final_results = Dict(
         "status" => "completed",
         "job_id" => JOB_ID,
         "best_params" => best_params_dict,
@@ -613,20 +840,64 @@ function run_mpi_search(config::Dict)
         "final_results" => true
     )
     
-    output_dir = joinpath(MPI_SEARCH_DIR, "output")
-    mkpath(output_dir)  # Create output directory if it doesn't exist
-    output_file = joinpath(output_dir, "mpi_search_results_job$(JOB_ID)_$(Dates.format(Dates.now(), "yyyy-mm-dd_HH-MM-SS")).json")
+    # Create a lightweight summary for quick access
+    latest_results = Dict(
+        "status" => "completed",
+        "job_id" => JOB_ID,
+        "best_params" => best_params_dict,
+        "best_params_vector" => best_params_vector,
+        "best_objective" => sanitize_nan_values(best_objective),
+        "best_moments" => sanitize_nan_values(best_moments),
+        "parameter_names" => param_names,
+        "elapsed_time" => elapsed_time,
+        "n_workers" => nworkers(),
+        "n_evaluations" => length(objective_values),
+        "avg_time_per_eval" => elapsed_time/length(objective_values),
+        "timestamp" => string(Dates.now()),
+        "search_summary" => Dict(
+            "total_evaluations" => length(objective_values),
+            "successful_evaluations" => length(filter(x -> isfinite(x) && x < 1e9, objective_values)),
+            "best_objective" => sanitize_nan_values(best_objective),
+            "objective_range" => begin
+                valid_objs = filter(x -> isfinite(x) && x < 1e9, objective_values)
+                if !isempty(valid_objs)
+                    Dict("min" => minimum(valid_objs), "max" => maximum(valid_objs))
+                else
+                    Dict("min" => NaN, "max" => NaN)
+                end
+            end
+        ),
+        "intermediate" => false,
+        "file_type" => "summary"
+    )
+    
+    # Save final results to results directory
+    results_dir = joinpath(MPI_SEARCH_DIR, "output", "results")
+    mkpath(results_dir)  # Create results directory if it doesn't exist
+    final_output_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_final.json")
     
     try
-        open(output_file, "w") do f
-            JSON3.pretty(f, results)
+        # Save complete final results (large file with all data)
+        open(final_output_file, "w") do f
+            JSON3.pretty(f, final_results)
         end
-        println("Results saved to: $output_file")
+        println("Final results (complete archive) saved to: $final_output_file")
+        
+        # Save lightweight summary results for quick access
+        latest_output_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_latest.json")
+        open(latest_output_file, "w") do f
+            JSON3.pretty(f, latest_results)
+        end
+        println("Latest results (quick summary) saved to: $latest_output_file")
+        
     catch e
         println("❌ Failed to save results: $e")
     end
     
-    return results
+    # Clean up intermediate snapshots, keeping only the latest one
+    cleanup_intermediate_snapshots()
+    
+    return final_results
 end
 
 # --- 9. Execute search ---
