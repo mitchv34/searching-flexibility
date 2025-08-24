@@ -243,6 +243,7 @@ function compute_model_moments(
     is_inperson = @. ForwardDiff.value(avg_alpha_policy) <= αtol_val
     is_remote = @. ForwardDiff.value(avg_alpha_policy) >= (1.0 - αtol_val)
     is_hybrid = @. (ForwardDiff.value(avg_alpha_policy) > αtol_val) && (ForwardDiff.value(avg_alpha_policy) < (1.0 - αtol_val))
+    is_RH = .!is_inperson # Remote or Hybrid
     is_low_psi = zeros(Bool, size(is_hybrid)); is_low_psi[:, 1:idx_low_end] .= true;
     is_high_psi = zeros(Bool, size(is_hybrid)); is_high_psi[:, idx_high_start:end] .= true;
 
@@ -281,6 +282,27 @@ function compute_model_moments(
     mean_alpha_highpsi = sum_n_high_valid > 0 ? sum(avg_alpha_policy .* n .* is_high_psi .* valid) / sum_n_high_valid : 0.0
     diff_alpha_high_lowpsi = mean_alpha_highpsi - mean_alpha_lowpsi
 
+    # --- WAGE MOMENTS ---
+
+    # Moment for c₀: Compensating Wage Differential
+    sum_n_inperson_valid = sum(n .* is_inperson .* valid)
+    sum_n_remote_valid = sum(n .* is_remote .* valid)
+    mean_logwage_inperson = sum_n_inperson_valid > 0 ? sum(log.(max.(1e-12, avg_wage_policy)) .* n .* is_inperson .* valid) / sum_n_inperson_valid : 0.0
+    mean_logwage_remote = sum_n_remote_valid > 0 ? sum(log.(max.(1e-12, avg_wage_policy)) .* n .* is_remote .* valid) / sum_n_remote_valid : 0.0
+    diff_logwage_inperson_remote = mean_logwage_inperson - mean_logwage_remote
+
+    # Moment for ψ₀: Wage Premium for High-ψ Firms (on RH subsample)
+    sum_n_RH_low_valid = sum(n .* is_low_psi .* is_RH .* valid)
+    sum_n_RH_high_valid = sum(n .* is_high_psi .* is_RH .* valid)
+    mean_logwage_RH_lowpsi = sum_n_RH_low_valid > 0 ? sum(log.(max.(1e-12, avg_wage_policy)) .* n .* is_low_psi .* is_RH .* valid) / sum_n_RH_low_valid : 0.0
+    mean_logwage_RH_highpsi = sum_n_RH_high_valid > 0 ? sum(log.(max.(1e-12, avg_wage_policy)) .* n .* is_high_psi .* is_RH .* valid) / sum_n_RH_high_valid : 0.0
+    wage_premium_high_psi = mean_logwage_RH_highpsi - mean_logwage_RH_lowpsi
+
+    # Moment for ν: Wage Slope (Proxy)
+    # We use the wage premium as a proxy for the slope in the theoretical moments.
+    # The full SMM will correct this by running the actual regression.
+    wage_slope_psi = wage_premium_high_psi
+
     # Create full dictionary of ALL computed moments
     full = Dict{Symbol, T}(
         :mean_logwage => mean_logwage,
@@ -293,7 +315,10 @@ function compute_model_moments(
         :agg_productivity => agg_productivity,
         :diff_alpha_high_lowpsi => diff_alpha_high_lowpsi,
         :market_tightness => market_tightness,
-        :job_finding_rate => job_finding_rate
+        :job_finding_rate => job_finding_rate,
+        :diff_logwage_inperson_remote => diff_logwage_inperson_remote, # For c₀
+        :wage_premium_high_psi => wage_premium_high_psi,             # For ψ₀
+        :wage_slope_psi => wage_slope_psi                          # For ν
     )
 
     # FIXED: Only return the moments that were actually requested
