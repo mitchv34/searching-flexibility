@@ -344,7 +344,13 @@ function main()
     if results_file === nothing
         println("❌ No results files found for job $(JOB_ID !== nothing ? JOB_ID : "any")")
         println("💡 Make sure the MPI search is running and has started saving intermediate results")
-        return
+        println("⏳ Waiting for results file to appear...")
+        
+        # Wait until results file is found
+        while results_file === nothing
+            sleep(5)  # Check every 5 seconds
+            results_file = find_latest_results_file()
+        end
     end
     
     println("✅ Found results file: ", colorize(basename(results_file), :green))
