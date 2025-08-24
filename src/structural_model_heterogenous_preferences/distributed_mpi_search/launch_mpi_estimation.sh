@@ -12,7 +12,7 @@ MPI_SCRIPT="$PROJECT_ROOT/src/structural_model_heterogenous_preferences/distribu
 MONITORING_SCRIPT="$PROJECT_ROOT/src/structural_model_heterogenous_preferences/distributed_mpi_search/enhanced_monitoring.jl"
 ANALYSIS_SCRIPT="$PROJECT_ROOT/src/structural_model_heterogenous_preferences/distributed_mpi_search/advanced_analysis.jl"
 CONFIG_FILE="$PROJECT_ROOT/src/structural_model_heterogenous_preferences/distributed_mpi_search/mpi_search_config.yaml"
-OUTPUT_DIR="$PROJECT_ROOT/output"
+OUTPUT_DIR="$PROJECT_ROOT/src/structural_model_heterogenous_preferences/distributed_mpi_search/output"
 LOGS_DIR="$OUTPUT_DIR/logs"
 
 # Colors for output
@@ -214,7 +214,16 @@ echo ""
 echo "🚀 Starting MPI search with configuration: $CONFIG_NAME"
 echo "=============================================="
 
-julia --project="$PROJECT_ROOT" "$MPI_SCRIPT" "$CONFIG_FILE"
+# Use the precompiled system image to avoid compilation time
+SYSIMAGE_PATH="$PROJECT_ROOT/src/structural_model_heterogenous_preferences/distributed_mpi_search/MPI_GridSearch_sysimage.so"
+
+if [ -f "\$SYSIMAGE_PATH" ]; then
+    echo "Using precompiled system image: \$SYSIMAGE_PATH"
+    julia --sysimage="\$SYSIMAGE_PATH" --project="$PROJECT_ROOT" "$MPI_SCRIPT" "$CONFIG_FILE"
+else
+    echo "⚠️  System image not found at \$SYSIMAGE_PATH, using standard Julia"
+    julia --project="$PROJECT_ROOT" "$MPI_SCRIPT" "$CONFIG_FILE"
+fi
 
 echo ""
 echo "=============================================="
