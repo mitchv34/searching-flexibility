@@ -17,7 +17,9 @@ clear all
 set more off
 
 * CONSTANTS
-local HIGH_PSI_PERCENTILE = 90  // Define high-psi firms as top 10% (90th percentile and above)
+local HIGH_PSI_PCT = 75   // High-psi = psi >= 75th percentile
+local LOW_PSI_PCT  = 25   // Low-psi  = psi <= 25th percentile
+local ALPHA_TOL    = 0.2  // In-person alpha <= 0.2, Remote alpha >= 0.8, else hybrid
 
 * Set working directory to project root
 cd "/project/high_tech_ind/searching-flexibility"
@@ -99,24 +101,28 @@ replace psi = teleworkable_ocssoc_minor if missing(psi) & !missing(teleworkable_
 * Verify we have valid psi for all remaining observations
 assert !missing(psi)
 
-* Create psi threshold for high/low psi classification using single percentile
-* FIXED: More explicit threshold calculation
-capture drop psi_h_limit high_psi low_psi
-
-* Calculate 90th percentile threshold by year more explicitly
-gen psi_h_limit = .
+* Create psi thresholds for high / low (75 / 25 split)
+capture drop psi_hi_threshold psi_lo_threshold high_psi low_psi
+gen psi_hi_threshold = .
+gen psi_lo_threshold = .
 forvalues yr = 2022/2025 {
-    qui sum psi if year == `yr', detail
-    replace psi_h_limit = r(p90) if year == `yr'
-    display "Year `yr': 90th percentile threshold = " %8.4f r(p90)
+    quietly sum psi if year == `yr', detail
+    local p75 = r(p75)
+    local p25 = r(p25)
+    replace psi_hi_threshold = `p75' if year == `yr'
+    replace psi_lo_threshold = `p25' if year == `yr'
+    display "Year `yr': psi p25 = " %8.4f `p25' ", psi p75 = " %8.4f `p75'
 }
 
-* Generate high_psi and low_psi dummies based on the defined threshold
-gen high_psi = (psi >= psi_h_limit) if !missing(psi) & !missing(psi_h_limit)
-gen low_psi = (psi < psi_h_limit) if !missing(psi) & !missing(psi_h_limit)
+* High psi: >= 75th percentile; Low psi: <= 25th percentile; middle band unused for diff moments
+gen high_psi = (psi >= psi_hi_threshold) if !missing(psi) & !missing(psi_hi_threshold)
+gen low_psi  = (psi <= psi_lo_threshold) if !missing(psi) & !missing(psi_lo_threshold)
 
-* Update high_psi_flag to match our new high_psi definition for consistency
-replace high_psi_flag = high_psi if !missing(psi)
+* Synchronize legacy flag if present
+capture confirm variable high_psi_flag
+if !_rc {
+    replace high_psi_flag = high_psi if !missing(psi)
+}
 
 * Create education dummies
 qui tab educ, gen(educ_)
@@ -146,17 +152,18 @@ qui tab race, gen(race_)
 *     tab occsoc_broad, gen(occ_)
 * }
 
-* Create work arrangement indicators (making sure they're numeric)
-destring full_inperson, replace force
-destring hybrid, replace force
-destring full_remote, replace force
+* Reconstruct work arrangement from continuous alpha (aligned with Julia threshold rule)
+* In-person: alpha <= ALPHA_TOL; Remote: alpha >= 1 - ALPHA_TOL; Hybrid: else
+* drop in_person hybrid full_remote work_cat_sum
+gen in_person = (alpha <= `ALPHA_TOL') if !missing(alpha)
+drop full_remote 
+gen full_remote = (alpha >= 1 - `ALPHA_TOL') if !missing(alpha)
+drop hybrid
+gen hybrid = (alpha > `ALPHA_TOL' & alpha < 1 - `ALPHA_TOL') if !missing(alpha)
 
-* Create consistent variable names
-gen in_person = full_inperson
-
-* Verify work arrangement categories are mutually exclusive
+* Sanity check: categories mutually exclusive
 gen work_cat_sum = in_person + hybrid + full_remote
-assert work_cat_sum == 1
+assert work_cat_sum <= 1  // middle band could be missing if alpha missing
 
 *===============================================================================
 * CREATE CONTROL VARIABLE DUMMIES
@@ -350,13 +357,13 @@ encode occsoc_broad, generate(occupation)
 display "============================================================"
 
 * Compute moments by year
-preserve
+preserve  // <-- This preserve is for the moments computation
 
-* Initialize results matrix (4 years x 22 moments)
-matrix results = J(4, 22, .)
+* Initialize results matrix (4 years x 23 moments)
+matrix results = J(4, 23, .)
 
 * Set column names
-matrix colnames results = mean_logwage var_logwage mean_alpha var_alpha mean_logwage_inperson mean_logwage_remote diff_logwage_inperson_remote inperson_share hybrid_share remote_share agg_productivity mean_logwage_RH_lowpsi mean_logwage_RH_highpsi diff_logwage_RH_high_lowpsi mean_alpha_highpsi mean_alpha_lowpsi diff_alpha_high_lowpsi diff_logwage_high_lowpsi var_logwage_highpsi var_logwage_lowpsi ratio_var_logwage_high_lowpsi market_tightness
+matrix colnames results = mean_logwage var_logwage mean_alpha var_alpha mean_logwage_inperson mean_logwage_remote diff_logwage_inperson_remote inperson_share hybrid_share remote_share agg_productivity mean_logwage_RH_lowpsi mean_logwage_RH_highpsi diff_logwage_RH_high_lowpsi mean_alpha_highpsi mean_alpha_lowpsi diff_alpha_high_lowpsi diff_logwage_high_lowpsi var_logwage_highpsi var_logwage_lowpsi ratio_var_logwage_high_lowpsi market_tightness p90_p10_logwage
 
 matrix rownames results = "2022" "2023" "2024" "2025"
 
@@ -437,7 +444,7 @@ foreach yr of numlist 2022 2023 2024 2025 {
     local n_remote = r(N)
 
     qui reghdfe logwage hybrid in_person experience experience_sq educ_* sex_* race_* ///
-        [pweight=wtfinl] if year == `yr' & !missing(logwage, experience, wtfinl), absorb(industry occupation) vce(robust)
+        [pweight=wtfinl] if year == `yr' & !missing(logwage, experience, wtfinl), absorb(industry occupation)vce(cluster industry occupation)
     
     * Check if regression succeeded and coefficient exists
     if e(N) > 0 {
@@ -457,7 +464,7 @@ foreach yr of numlist 2022 2023 2024 2025 {
         * qui reg logwage high_psi experience experience_sq educ_* sex_* race_* ind_* occ_* ///
         *     [pweight=wtfinl] if year == `yr' & (hybrid == 1 | full_remote == 1) & !missing(logwage, experience, high_psi)
         qui reghdfe logwage high_psi experience experience_sq educ_* sex_* race_*  ///
-            [pweight=wtfinl] if year == `yr' & (hybrid == 1 | full_remote == 1) & !missing(logwage, experience, high_psi), absorb(industry occupation) vce(robust)
+            [pweight=wtfinl] if year == `yr' & (hybrid == 1 | full_remote == 1) & !missing(logwage, experience, high_psi), absorb(industry occupation)vce(cluster industry occupation)
         
         * Get coefficient on high_psi (β₁) - this identifies ψ₀
         matrix results[`row', 18] = _b[high_psi]
@@ -469,7 +476,7 @@ foreach yr of numlist 2022 2023 2024 2025 {
         * qui reg logwage psi experience experience_sq educ_* sex_* race_* ind_* occ_* ///
         *     [pweight=wtfinl] if year == `yr' & (hybrid == 1 | full_remote == 1) & !missing(logwage, experience, psi)
         qui reghdfe logwage psi experience experience_sq educ_* sex_* race_* ///
-            [pweight=wtfinl] if year == `yr' & (hybrid == 1 | full_remote == 1) & !missing(logwage, experience, psi), absorb(industry occupation) vce(robust)
+            [pweight=wtfinl] if year == `yr' & (hybrid == 1 | full_remote == 1) & !missing(logwage, experience, psi), absorb(industry occupation)vce(cluster industry occupation)
 
         * Get coefficient on psi (β₁) - this identifies ν
         matrix results[`row', 14] = _b[psi]
@@ -537,9 +544,20 @@ foreach yr of numlist 2022 2023 2024 2025 {
     
     * Aggregate productivity (fixed values) - column 11
     matrix results[`row', 11] = `ap_`yr''
+    
+    * 90/10 ratio of log wages - column 23
+    qui sum logwage [weight=wtfinl] if year == `yr' & !missing(logwage), detail
+    if r(N) > 0 {
+        local p90_wage = r(p90)
+        local p10_wage = r(p10)
+        if !missing(`p90_wage') & !missing(`p10_wage') & `p10_wage' != 0 {
+            local ratio_90_10 = `p90_wage' / `p10_wage'
+            matrix results[`row', 23] = `ratio_90_10'
+        }
+    }
 }
 
-restore
+restore  // <-- This restore returns to the state before moments computation
 
 * Convert matrix to dataset for CSV export
 clear
@@ -737,6 +755,14 @@ foreach yr of local years {
         file write yaml "  market_tightness: null" _n
     }
     
+    * 90/10 ratio of log wages
+    if !missing(p90_p10_logwage[`i']) {
+        file write yaml "  p90_p10_logwage: " %9.6f (p90_p10_logwage[`i']) _n
+    }
+    else {
+        file write yaml "  p90_p10_logwage: null" _n
+    }
+    
     * Leave job finding rate as null for now
     file write yaml "  job_finding_rate: null" _n
     
@@ -747,5 +773,283 @@ display ""
 display "============================================================"
 
 * Show summary of results
-list year mean_logwage mean_alpha inperson_share hybrid_share remote_share diff_logwage_inperson_remote market_tightness
+list year mean_logwage mean_alpha inperson_share hybrid_share remote_share diff_logwage_inperson_remote market_tightness p90_p10_logwage
 
+display ""
+display "============================================================"
+display "✅ DATA MOMENTS COMPUTATION COMPLETE"
+display "============================================================"
+
+/*==============================================================================
+* APPENDIX: Create Simulation Scaffolding for SMM
+* 
+* Purpose: Create a dataset of real-world control variables and common
+*          random numbers to be used in the Julia SMM estimation. This
+*          ensures coherence between the data and the simulation and
+*          acts as a variance reduction technique.
+*==============================================================================*/
+
+display ""
+display "============================================================"
+display "🏗️  CREATING SIMULATION SCAFFOLDING"
+display "============================================================"
+
+// --- Configuration ---
+local N_sim = 50000      // Set the desired number of simulated individuals
+
+// Define the list of control variables to keep.
+// This should match the controls used in the regressions exactly.
+local controls_to_keep "experience experience_sq educ sex race industry occupation wtfinl"
+
+display "Control variables for scaffolding:"
+display "`controls_to_keep'"
+
+// Reload the original dataset since we're working with the results matrix now
+import delimited "data/processed/cps/cps_alpha_wage_present_reweighted.csv", clear
+
+// Repeat the essential data preparation steps
+drop indnaics occsoc_detailed occsoc_minor ftpt edu3 age4 v38 cell_id
+
+// Keep only years 2022-2025
+keep if inlist(year, 2022, 2023, 2024, 2025)
+
+// Recreate the essential variables needed for scaffolding
+destring log_wage_real, replace force
+gen logwage = log_wage_real if log_wage_real != . & log_wage_real != 0
+
+destring alpha, replace force
+destring educ, replace force
+destring age, replace force
+destring sex, replace force
+destring race, replace force
+destring wtfinl, replace force
+
+// Create years of education
+gen years_educ = .
+replace years_educ = 0 if educ == 2      
+replace years_educ = 8 if educ == 20     
+replace years_educ = 9 if educ == 30     
+replace years_educ = 10 if educ == 40    
+replace years_educ = 11 if educ == 50    
+replace years_educ = 12 if educ == 60    
+replace years_educ = 12 if educ == 71    
+replace years_educ = 12 if educ == 73    
+replace years_educ = 13 if educ == 81    
+replace years_educ = 14 if educ == 91    
+replace years_educ = 14 if educ == 92    
+replace years_educ = 14 if educ == 10    
+replace years_educ = 16 if educ == 111   
+replace years_educ = 18 if educ == 123   
+replace years_educ = 20 if educ == 124   
+replace years_educ = 21 if educ == 125   
+
+keep if !missing(years_educ) & years_educ >= 6
+
+// Create experience variables
+gen experience = age - years_educ - 6
+gen experience_sq = experience^2
+
+// Recreate the dummy variables exactly as in the main analysis
+gen educ_less_hs = (years_educ < 12) if !missing(years_educ)           
+gen educ_hs = (years_educ == 12) if !missing(years_educ)               
+gen educ_some_college = (years_educ > 12 & years_educ < 16) if !missing(years_educ)  
+gen educ_ba = (years_educ == 16) if !missing(years_educ)               
+gen educ_graduate = (years_educ > 16) if !missing(years_educ)          
+
+gen sex_male = (sex == 1) if !missing(sex)
+gen sex_female = (sex == 2) if !missing(sex)
+
+gen race_white = (race == 100) if !missing(race)                
+gen race_black = (race == 200) if !missing(race)                
+gen race_asian = inlist(race, 651, 652) if !missing(race)       
+gen race_other = !inlist(race, 100, 200, 651, 652) if !missing(race) 
+
+encode ind_broad, generate(industry)
+encode occsoc_broad, generate(occupation)
+
+// --- Collapse raw codes into regression categories for export ---
+// Keep raw copies
+rename educ educ_raw
+rename sex  sex_raw
+rename race race_raw
+
+// Education 5-group (same as educ_* dummies logic)
+capture drop educ_cat
+gen byte educ_cat = .
+replace educ_cat = 1 if years_educ < 12 & !missing(years_educ)
+replace educ_cat = 2 if years_educ == 12
+replace educ_cat = 3 if years_educ > 12 & years_educ < 16
+replace educ_cat = 4 if years_educ == 16
+replace educ_cat = 5 if years_educ > 16
+label define EDUCAT 1 "less_hs" 2 "hs" 3 "some_college" 4 "ba" 5 "graduate", replace
+label values educ_cat EDUCAT
+
+// Sex 2-group
+capture drop sex_cat
+gen byte sex_cat = .
+replace sex_cat = 1 if sex_raw == 1
+replace sex_cat = 2 if sex_raw == 2
+label define SEXCAT 1 "male" 2 "female", replace
+label values sex_cat SEXCAT
+
+// Race 4-group (white / black / asian / other) matching race_* dummies
+capture drop race_cat
+gen byte race_cat = .
+replace race_cat = 1 if race_raw == 100
+replace race_cat = 2 if race_raw == 200
+replace race_cat = 3 if inlist(race_raw, 651, 652)
+replace race_cat = 4 if !missing(race_raw) & !inlist(race_raw, 100, 200, 651, 652)
+label define RACECAT 1 "white" 2 "black" 3 "asian" 4 "other", replace
+label values race_cat RACECAT
+
+// Decode to string variables (so Julia sees category names directly)
+decode educ_cat, gen(educ)
+decode sex_cat,  gen(sex)
+decode race_cat, gen(race)
+
+// (Optional) drop the intermediate numeric category codes
+drop educ_cat sex_cat race_cat
+
+// (Optional) drop dummy indicators not needed for export (if they exist here)
+capture drop educ_less_hs educ_hs educ_some_college educ_ba educ_graduate
+capture drop sex_male sex_female
+capture drop race_white race_black race_asian race_other
+
+// controls_to_keep already lists educ sex race; they now refer to the string category vars
+
+// Loop through all years to create scaffolding for each (SKIP 2022)
+foreach TARGET_YEAR of numlist 2023 2024 2025 {
+    
+    display ""
+    display "Creating scaffolding for year `TARGET_YEAR'..."
+    
+    // Preserve the current state
+    preserve
+    
+    // Keep only the target year for sampling
+    keep if year == `TARGET_YEAR'
+    
+    // Check if we have enough observations
+    qui count if !missing(wtfinl) & wtfinl > 0
+    local n_available = r(N)
+    display "Available observations for year `TARGET_YEAR': `n_available'"
+    
+    if `n_available' < 1000 {
+        display "⚠️  WARNING: Very few observations available for year `TARGET_YEAR' (`n_available')"
+        display "   Consider reducing N_sim or checking data quality."
+    }
+    
+
+    // Seed then draw N_sim observations with replacement
+    // This extracts observations (with replacement)
+    set seed 12345
+    bsample `N_sim', weight(wtfinl)
+
+    // Ensure exported numeric formatting preserves decimals
+    display "✓ Sample of `N_sim' drawn for year `TARGET_YEAR'."
+    
+    // Keep only the necessary control variables plus year identifier
+    keep year `controls_to_keep'
+    
+    // Verify we have all the control variables
+    foreach var of local controls_to_keep {
+        capture confirm variable `var'
+        if _rc != 0 {
+            display "⚠️  WARNING: Control variable `var' not found in year `TARGET_YEAR'"
+        }
+    }
+    
+    // Generate the common random numbers for the simulation
+    set seed 12345 // Set seed for reproducibility
+    gen u_psi = runiform()     // Random draw for psi assignment (was u_match)
+    gen u_h = runiform()       // Random draw for h assignment (was u_alpha)
+    gen u_alpha = runiform()   // Random draw for alpha assignment (was u_shock)
+    
+    display "✓ Added uniform random draws: u_psi, u_h, u_alpha."
+    
+    // Add observation ID for tracking
+    gen sim_id = _n
+
+    // Keep only required columns for Julia fixed-effects regressions & simulation
+    keep year experience experience_sq educ sex race industry occupation u_psi u_h u_alpha sim_id
+    
+    // Export final scaffolding dataset as CSV
+    export delimited "data/processed/simulation_scaffolding_`TARGET_YEAR'.csv", replace
+
+    // Also create a summary file with variable info
+    describe, replace clear
+    export delimited "data/processed/simulation_scaffolding_`TARGET_YEAR'_variables.csv", replace
+    
+    display "✓ Variable descriptions saved to: data/processed/simulation_scaffolding_`TARGET_YEAR'_variables.csv"
+    
+    // Restore for next iteration
+    restore
+}
+
+// Create a combined scaffolding file with all years (2023-2025 only)
+display ""
+display "Creating combined scaffolding file..."
+
+clear
+local first_file = 1
+foreach TARGET_YEAR of numlist 2023 2024 2025 {
+    if `first_file' {
+        import delimited "data/processed/simulation_scaffolding_`TARGET_YEAR'.csv", clear
+        // Ensure only the required columns (safe if older files had extras)
+        keep year experience experience_sq educ sex race industry occupation u_psi u_h u_alpha sim_id
+        tempfile combined
+        save `combined'
+        local first_file = 0
+    }
+    else {
+        import delimited "data/processed/simulation_scaffolding_`TARGET_YEAR'.csv", clear
+        keep year experience experience_sq educ sex race industry occupation u_psi u_h u_alpha sim_id
+        append using `combined'
+        save `combined', replace
+    }
+}
+
+use `combined', clear
+export delimited "data/processed/simulation_scaffolding_all_years.csv", replace
+display "✓ Combined scaffolding (trimmed columns) saved."
+
+// Create a summary report
+display ""
+display "============================================================"
+display "📊 SCAFFOLDING SUMMARY REPORT"
+display "============================================================"
+
+qui tab year
+display "Total observations by year:"
+tab year
+
+display ""
+display "Control variables included:"
+foreach var of local controls_to_keep {
+    capture confirm variable `var'
+    if _rc == 0 {
+        display "  ✓ `var'"
+    }
+    else {
+        display "  ✗ `var' (missing)"
+    }
+}
+
+display ""
+display "Random number variables:"
+display "  ✓ u_psi (psi assignment random draw)"
+display "  ✓ u_h (h assignment random draw)"  
+display "  ✓ u_alpha (alpha assignment random draw)"
+display "  ✓ sim_id (observation identifier)"
+display "  ✓ wtfinl (survey weights)"
+
+display ""
+display "Years included in scaffolding: 2023, 2024, 2025"
+display "Note: 2022 skipped due to insufficient observations"
+display ""
+display "Files created in data/processed/:"
+display "  ✓ simulation_scaffolding_2023.csv"
+display "  ✓ simulation_scaffolding_2024.csv"
+display "  ✓ simulation_scaffolding_2025.csv"
+display "  ✓ simulation_scaffolding_all_years.csv"
+display "  ✓ simulation_scaffolding_YYYY_variables.csv (descriptions)"
