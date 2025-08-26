@@ -47,7 +47,7 @@ if haskey(ENV, "SLURM_NTASKS")
         if isfile(SYSIMAGE_PATH) && get(ENV, "DISABLE_CUSTOM_SYSIMAGE", "0") != "1"
             exeflags *= " --sysimage=$(SYSIMAGE_PATH)"
         else
-            println("⚠️  Sysimage not used (missing or disabled); workers will JIT compile.")
+            println("⚠️  Sysimage disabled or missing -> JIT compile.")
         end
         exeflags *= " -e 'ENV[\"JULIA_PKG_PRECOMPILE_AUTO\"]=\"0\"'"
         println("[DEBUG] Worker exeflags: \n  $(exeflags)")
@@ -91,7 +91,7 @@ if haskey(ENV, "SLURM_NTASKS")
             if isfile(SYSIMAGE_PATH) && get(ENV, "DISABLE_CUSTOM_SYSIMAGE", "0") != "1"
                 exeflags *= " --sysimage=$(SYSIMAGE_PATH)"
             else
-                println("⚠️  Sysimage not used (missing or disabled); workers will JIT compile.")
+                println("⚠️  Sysimage disabled or missing -> JIT compile.")
             end
             exeflags *= " -e 'ENV[\"JULIA_PKG_PRECOMPILE_AUTO\"]=\"0\"'"
             addprocs(SlurmManager(); exeflags=exeflags)

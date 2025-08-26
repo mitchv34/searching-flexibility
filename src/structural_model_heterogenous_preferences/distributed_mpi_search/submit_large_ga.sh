@@ -36,16 +36,9 @@ export JULIA_PKG_PRECOMPILE_AUTO=0
 export JULIA_NUM_THREADS=1   # Each worker single-threaded; master will spawn up to (CPUs-1) workers
 export INCREMENTAL_WORKERS=1  # Enable incremental spawn diagnostics
 
-echo "[INFO] Using custom sysimage if present."
-unset DISABLE_CUSTOM_SYSIMAGE || true
-SYSIMAGE_PATH="src/structural_model_heterogenous_preferences/distributed_mpi_search/MPI_GridSearch_sysimage.so"
-if [[ -f "$SYSIMAGE_PATH" ]]; then
-  SYSIMAGE_FLAG="--sysimage=$SYSIMAGE_PATH"
-  echo "[INFO] Sysimage found: $SYSIMAGE_PATH"
-else
-  SYSIMAGE_FLAG=""
-  echo "[WARN] Sysimage not found at $SYSIMAGE_PATH; proceeding with JIT."
-fi
+echo "[INFO] Forcing JIT mode (sysimage disabled per request)."
+export DISABLE_CUSTOM_SYSIMAGE=1
+SYSIMAGE_FLAG=""
 
 # Master process launches workers via SlurmClusterManager inside script
 # srun used to allocate the tasks; only one Julia invocation needed.
