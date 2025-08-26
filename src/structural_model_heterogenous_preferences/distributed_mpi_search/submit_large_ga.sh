@@ -34,6 +34,7 @@ echo "[INFO] SLURM_NTASKS=${SLURM_NTASKS:-unset} (single-task launch strategy)"
 # Recommended: disable precompile storms on workers
 export JULIA_PKG_PRECOMPILE_AUTO=0
 export JULIA_NUM_THREADS=1   # Each worker single-threaded; master will spawn up to (CPUs-1) workers
+export INCREMENTAL_WORKERS=1  # Enable incremental spawn diagnostics
 
 echo "[INFO] Using custom sysimage if present."
 unset DISABLE_CUSTOM_SYSIMAGE || true
