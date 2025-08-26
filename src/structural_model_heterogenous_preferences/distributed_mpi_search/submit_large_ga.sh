@@ -34,20 +34,9 @@ echo "[INFO] SLURM_NTASKS=${SLURM_NTASKS:-unset}"
 export JULIA_PKG_PRECOMPILE_AUTO=0
 export JULIA_NUM_THREADS=1   # Each worker single-threaded (tune if desired)
 
-SYSIMAGE_PATH="${SCRIPT_DIR}/MPI_GridSearch_sysimage.so"
-SYSIMAGE_FLAG=""
-if [[ -f "${SYSIMAGE_PATH}" ]]; then
-  # Detect CPU features mismatch by attempting a dry run loading the image; if it errors, fallback.
-  if julia --project=. --sysimage="${SYSIMAGE_PATH}" -e 'println("sysimage_ok")' >/dev/null 2>&1; then
-    echo "[INFO] Using sysimage ${SYSIMAGE_PATH}"
-    SYSIMAGE_FLAG="--sysimage=${SYSIMAGE_PATH}"
-  else
-    echo "[WARN] Sysimage incompatible on this node; disabling and falling back to JIT." >&2
-    export DISABLE_CUSTOM_SYSIMAGE=1
-  fi
-else
-  echo "[WARN] Sysimage not found; running with JIT compilation."
-fi
+echo "[INFO] Forcing JIT mode (user request) – skipping custom sysimage even if present."
+export DISABLE_CUSTOM_SYSIMAGE=1
+SYSIMAGE_FLAG=""  # ensure unset
 
 # Master process launches workers via SlurmClusterManager inside script
 # srun used to allocate the tasks; only one Julia invocation needed.
