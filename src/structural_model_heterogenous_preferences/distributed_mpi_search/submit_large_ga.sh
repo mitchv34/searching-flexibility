@@ -7,10 +7,11 @@
 #SBATCH --job-name=GA_Flex_single
 #SBATCH --ntasks=1                  # Single master; spawns workers internally
 #SBATCH --cpus-per-task=32          # Provide 32 CPUs to share among workers
-#SBATCH --time=04:00:00             # Walltime limit (short partition)
+#SBATCH --time=01:55:00             # Walltime (<2h limit of econ-grad-short)
 #SBATCH --mem=128G                  # Total memory for all spawned workers
 #SBATCH --output=src/structural_model_heterogenous_preferences/distributed_mpi_search/output/logs/ga_short_%j.out
 #SBATCH --error=src/structural_model_heterogenous_preferences/distributed_mpi_search/output/logs/ga_short_%j.err
+#SBATCH --partition=econ-grad-short  # Submit to econ-grad short partition per user request
 #SBATCH --mail-type=END,FAIL        # (Optional) notifications
 ##SBATCH --mail-user=you@example.com
 
@@ -34,9 +35,16 @@ echo "[INFO] SLURM_NTASKS=${SLURM_NTASKS:-unset} (single-task launch strategy)"
 export JULIA_PKG_PRECOMPILE_AUTO=0
 export JULIA_NUM_THREADS=1   # Each worker single-threaded; master will spawn up to (CPUs-1) workers
 
-echo "[INFO] Forcing JIT mode (user request) – skipping custom sysimage even if present."
-export DISABLE_CUSTOM_SYSIMAGE=1
-SYSIMAGE_FLAG=""  # ensure unset
+echo "[INFO] Using custom sysimage if present."
+unset DISABLE_CUSTOM_SYSIMAGE || true
+SYSIMAGE_PATH="src/structural_model_heterogenous_preferences/distributed_mpi_search/MPI_GridSearch_sysimage.so"
+if [[ -f "$SYSIMAGE_PATH" ]]; then
+  SYSIMAGE_FLAG="--sysimage=$SYSIMAGE_PATH"
+  echo "[INFO] Sysimage found: $SYSIMAGE_PATH"
+else
+  SYSIMAGE_FLAG=""
+  echo "[WARN] Sysimage not found at $SYSIMAGE_PATH; proceeding with JIT."
+fi
 
 # Master process launches workers via SlurmClusterManager inside script
 # srun used to allocate the tasks; only one Julia invocation needed.

@@ -44,12 +44,10 @@ if haskey(ENV, "SLURM_NTASKS")
         println("Single-task allocation detected with $cpus_per_task CPUs; launching local workers.")
         desired_workers = max(cpus_per_task - 1, 1)  # leave 1 for master
         exeflags = "--startup-file=no --project=/project/high_tech_ind/searching-flexibility"
-        if get(ENV, "DISABLE_CUSTOM_SYSIMAGE", "0") == "1"
-            println("⚠️  DISABLE_CUSTOM_SYSIMAGE=1 -> skipping custom sysimage use on workers.")
-        elseif isfile(SYSIMAGE_PATH)
+        if isfile(SYSIMAGE_PATH) && get(ENV, "DISABLE_CUSTOM_SYSIMAGE", "0") != "1"
             exeflags *= " --sysimage=$(SYSIMAGE_PATH)"
         else
-            println("⚠️  Sysimage not found at $(SYSIMAGE_PATH); workers will JIT compile.")
+            println("⚠️  Sysimage not used (missing or disabled); workers will JIT compile.")
         end
         exeflags *= " -e 'ENV[\"JULIA_PKG_PRECOMPILE_AUTO\"]=\"0\"'"
         try
@@ -62,12 +60,10 @@ if haskey(ENV, "SLURM_NTASKS")
         println("Attempting to launch SlurmManager with SLURM_NTASKS=$requested_tasks ...")
         try
             exeflags = "--startup-file=no --project=/project/high_tech_ind/searching-flexibility"
-            if get(ENV, "DISABLE_CUSTOM_SYSIMAGE", "0") == "1"
-                println("⚠️  DISABLE_CUSTOM_SYSIMAGE=1 -> skipping custom sysimage use on workers.")
-            elseif isfile(SYSIMAGE_PATH)
+            if isfile(SYSIMAGE_PATH) && get(ENV, "DISABLE_CUSTOM_SYSIMAGE", "0") != "1"
                 exeflags *= " --sysimage=$(SYSIMAGE_PATH)"
             else
-                println("⚠️  Sysimage not found at $(SYSIMAGE_PATH); workers will JIT compile.")
+                println("⚠️  Sysimage not used (missing or disabled); workers will JIT compile.")
             end
             exeflags *= " -e 'ENV[\"JULIA_PKG_PRECOMPILE_AUTO\"]=\"0\"'"
             addprocs(SlurmManager(); exeflags=exeflags)
