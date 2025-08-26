@@ -7,10 +7,10 @@
 #SBATCH --job-name=GA_Flex_single
 #SBATCH --ntasks=1                  # Single master; spawns workers internally
 #SBATCH --cpus-per-task=32          # Provide 32 CPUs to share among workers
-#SBATCH --time=24:00:00             # Walltime limit
+#SBATCH --time=04:00:00             # Walltime limit (short partition)
 #SBATCH --mem=128G                  # Total memory for all spawned workers
-#SBATCH --output=src/structural_model_heterogenous_preferences/distributed_mpi_search/output/logs/ga_single_%j.out
-#SBATCH --error=src/structural_model_heterogenous_preferences/distributed_mpi_search/output/logs/ga_single_%j.err
+#SBATCH --output=src/structural_model_heterogenous_preferences/distributed_mpi_search/output/logs/ga_short_%j.out
+#SBATCH --error=src/structural_model_heterogenous_preferences/distributed_mpi_search/output/logs/ga_short_%j.err
 #SBATCH --mail-type=END,FAIL        # (Optional) notifications
 ##SBATCH --mail-user=you@example.com
 
