@@ -50,11 +50,39 @@ if haskey(ENV, "SLURM_NTASKS")
             println("⚠️  Sysimage not used (missing or disabled); workers will JIT compile.")
         end
         exeflags *= " -e 'ENV[\"JULIA_PKG_PRECOMPILE_AUTO\"]=\"0\"'"
-        try
-            addprocs(desired_workers; exeflags=exeflags)
-            println("✓ Added $(desired_workers) local workers (IDs: $(workers()))")
-        catch e
-            println("❌ Local worker launch failed: $e")
+        println("[DEBUG] Worker exeflags: \n  $(exeflags)")
+        incremental = get(ENV, "INCREMENTAL_WORKERS", "1") == "1"
+        if incremental
+            println("[DEBUG] Incremental worker spawn enabled (desired=$desired_workers)")
+            failures = 0
+            for k in 1:desired_workers
+                try
+                    addprocs(1; exeflags=exeflags)
+                    wid = workers()[end]
+                    proj_info = remotecall_fetch(() -> (Base.active_project(), get(ENV, "JULIA_PROJECT", "<none>")), wid)
+                    has_df = remotecall_fetch(() -> isdefined(Main, :DataFrames), wid)
+                    println("  ✓ Added worker #$k (id=$wid) active_project=$(proj_info[1]) JULIA_PROJECT=$(proj_info[2]) DataFrames_loaded=$(has_df)")
+                catch e
+                    failures += 1
+                    println("  ❌ Failed adding worker #$k: $e")
+                    showerror(stdout, e, catch_backtrace()); println() ; flush(stdout)
+                    # Stop early if first few fail to avoid long composite exceptions
+                    if failures >= 2
+                        println("[ABORT] Multiple worker launch failures; stopping incremental addition at k=$k.")
+                        break
+                    end
+                end
+            end
+            println("[RESULT] nworkers()=$(nworkers()) (target=$desired_workers)")
+        else
+            println("[DEBUG] Incremental worker spawn disabled; attempting bulk add of $desired_workers workers")
+            try
+                addprocs(desired_workers; exeflags=exeflags)
+                println("✓ Added $(desired_workers) local workers (IDs: $(workers()))")
+            catch e
+                println("❌ Local worker launch failed: $e")
+                showerror(stdout, e, catch_backtrace()); println()
+            end
         end
     else
         println("Attempting to launch SlurmManager with SLURM_NTASKS=$requested_tasks ...")
