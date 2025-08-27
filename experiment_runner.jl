@@ -185,6 +185,23 @@ function run_cross_moment_check(; verbose=false, quick=false)
     end
 end
 
+function run_minimal_experiment(; verbose=false, quick=false)
+    println("🧪 Running minimal synthetic experiment...")
+    
+    try
+        if verbose
+            run(`julia --project=. minimal_experiment.jl`)
+        else
+            run(pipeline(`julia --project=. minimal_experiment.jl`, stdout="/tmp/minimal_output.log"))
+            println("✅ Minimal experiment completed! Check /tmp/minimal_output.log for details")
+        end
+        return true
+    catch e
+        println("❌ Minimal experiment failed: $e")
+        return false
+    end
+end
+
 function run_profile_analysis(model_type::String; verbose=false, quick=false)
     println("⚡ Running performance profiling for $(model_type) model...")
     
@@ -211,12 +228,14 @@ end
 function list_available_experiments()
     println("🔬 Available Experiments:")
     println("  1. basic_model_test    - Test basic model initialization and solving")
-    println("  2. parameter_estimation - Run parameter estimation")
-    println("  3. cross_moment_check  - Run cross-moment validation")
-    println("  4. profile_analysis    - Run performance profiling")
-    println("  5. counterfactuals     - Run counterfactual experiments")
+    println("  2. minimal_experiment  - Run lightweight synthetic experiment")
+    println("  3. parameter_estimation - Run parameter estimation")
+    println("  4. cross_moment_check  - Run cross-moment validation")
+    println("  5. profile_analysis    - Run performance profiling")
+    println("  6. counterfactuals     - Run counterfactual experiments")
     println()
     println("Usage examples:")
+    println("  julia experiment_runner.jl minimal_experiment")
     println("  julia experiment_runner.jl basic_model_test")
     println("  julia experiment_runner.jl parameter_estimation --model new --quick")
     println("  julia experiment_runner.jl cross_moment_check --verbose")
@@ -242,6 +261,8 @@ function main()
     
     if experiment == "basic_model_test"
         success = run_basic_model_test(model_type; verbose=verbose, quick=quick)
+    elseif experiment == "minimal_experiment"
+        success = run_minimal_experiment(verbose=verbose, quick=quick)
     elseif experiment == "parameter_estimation"
         success = run_parameter_estimation(model_type; verbose=verbose, quick=quick)
     elseif experiment == "cross_moment_check"
