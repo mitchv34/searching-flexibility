@@ -1,0 +1,129 @@
+┌ Warning: Module SciMLBase with build ID fafbfcfd-1200-ea43-967d-f490ad000ae4 is missing from the cache.
+│ This may mean SciMLBase [0bca4576-84f4-4d90-8ffe-ffa030f20462] does not support precompilation but is imported by a module that does.
+└ @ Base loading.jl:2541
+┌ Warning: Module Optimization with build ID fafbfcfd-298b-29b4-4181-0bb617cc42fd is missing from the cache.
+│ This may mean Optimization [7f7a1694-90dd-40f0-9382-eb1efda571ba] does not support precompilation but is imported by a module that does.
+└ @ Base loading.jl:2541
+Precompiling Optimization...
+    556.7 ms  ✓ FastClosures
+    827.4 ms  ✓ CommonSolve
+    552.3 ms  ✓ LeftChildRightSiblingTrees
+    708.2 ms  ✓ RuntimeGeneratedFunctions
+    590.2 ms  ✓ GPUArraysCore
+   1151.2 ms  ✓ ADTypes
+    694.9 ms  ✓ ArrayInterface
+   1260.1 ms  ✓ FunctionWrappers
+   1205.5 ms  ✓ ProgressMeter
+   1105.7 ms  ✓ LoggingExtras
+    915.1 ms  ✓ L_BFGS_B_jll
+    940.8 ms  ✓ TerminalLoggers
+    611.7 ms  ✓ ArrayInterface → ArrayInterfaceStaticArraysCoreExt
+    876.8 ms  ✓ ADTypes → ADTypesConstructionBaseExt
+    721.6 ms  ✓ ArrayInterface → ArrayInterfaceGPUArraysCoreExt
+    803.5 ms  ✓ SciMLStructures
+    874.7 ms  ✓ ArrayInterface → ArrayInterfaceSparseArraysExt
+    656.7 ms  ✓ FunctionWrappersWrappers
+    817.2 ms  ✓ ConsoleProgressMonitor
+   1763.5 ms  ✓ RecipesBase
+    946.5 ms  ✓ LBFGSB
+   2640.5 ms  ✓ ExproniconLite
+   1219.0 ms  ✓ PreallocationTools
+   1790.1 ms  ✓ DifferentiationInterface
+    571.9 ms  ✓ DifferentiationInterface → DifferentiationInterfaceGPUArraysCoreExt
+   2186.6 ms  ✓ SciMLOperators
+   1630.4 ms  ✓ SymbolicIndexingInterface
+    741.0 ms  ✓ DifferentiationInterface → DifferentiationInterfaceSparseArraysExt
+   1716.1 ms  ✓ Jieko
+    729.8 ms  ✓ SciMLOperators → SciMLOperatorsStaticArraysCoreExt
+    889.1 ms  ✓ SciMLOperators → SciMLOperatorsSparseArraysExt
+   3922.3 ms  ✓ SparseConnectivityTracer
+    861.9 ms  ✓ DifferentiationInterface → DifferentiationInterfaceSparseConnectivityTracerExt
+   2329.9 ms  ✓ RecursiveArrayTools
+    903.7 ms  ✓ PreallocationTools → PreallocationToolsSparseConnectivityTracerExt
+   6029.9 ms  ✓ SparseMatrixColorings
+   1295.9 ms  ✓ RecursiveArrayTools → RecursiveArrayToolsSparseArraysExt
+    982.3 ms  ✓ DifferentiationInterface → DifferentiationInterfaceSparseMatrixColoringsExt
+   6982.6 ms  ✓ Moshi
+   8745.5 ms  ✓ SciMLBase
+   2751.3 ms  ✓ OptimizationBase
+   2519.9 ms  ✓ Optimization
+  42 dependencies successfully precompiled in 27 seconds. 59 already precompiled.
+Precompiling ArrayInterfaceChainRulesCoreExt...
+    526.2 ms  ✓ ArrayInterface → ArrayInterfaceChainRulesCoreExt
+  1 dependency successfully precompiled in 1 seconds. 11 already precompiled.
+Precompiling SymbolicIndexingInterfacePrettyTablesExt...
+    878.6 ms  ✓ SymbolicIndexingInterface → SymbolicIndexingInterfacePrettyTablesExt
+  1 dependency successfully precompiled in 2 seconds. 38 already precompiled.
+Precompiling RecursiveArrayToolsForwardDiffExt...
+   1101.9 ms  ✓ RecursiveArrayTools → RecursiveArrayToolsForwardDiffExt
+  1 dependency successfully precompiled in 2 seconds. 44 already precompiled.
+Precompiling RecursiveArrayToolsTablesExt...
+    792.8 ms  ✓ RecursiveArrayTools → RecursiveArrayToolsTablesExt
+  1 dependency successfully precompiled in 1 seconds. 37 already precompiled.
+Precompiling PreallocationToolsForwardDiffExt...
+    770.6 ms  ✓ PreallocationTools → PreallocationToolsForwardDiffExt
+  1 dependency successfully precompiled in 1 seconds. 27 already precompiled.
+┌ Warning: The call to compilecache failed to create a usable precompiled cache file for PreallocationToolsForwardDiffExt [34a8f204-0c2c-5664-bafb-c14baecaa342]
+│   exception = Invalid input in module list: expected DocStringExtensions.
+└ @ Base loading.jl:2596
+Precompiling SciMLBaseChainRulesCoreExt...
+    SciMLBaseChainRulesCoreExt Being precompiled by another machine (hostname: slurm109.ssc.wisc.edu, pid: 2661684, pidfile: /home/v/valdsbobes/.julia/compiled/v1.11/SciMLBaseChainRulesCoreExt/rhCXQ_xTxTN.ji.pidfile)
+Info Given SciMLBaseChainRulesCoreExt was explicitly requested, output will be shown live [0K
+[0K┌ Warning: Module SciMLBase with build ID fafbfcfd-1200-ea43-967d-f490ad000ae4 is missing from the cache.
+[0K│ This may mean SciMLBase [0bca4576-84f4-4d90-8ffe-ffa030f20462] does not support precompilation but is imported by a module that does.
+[0K└ @ Base loading.jl:2541
+  10894.6 ms  ✓ SciMLBase → SciMLBaseChainRulesCoreExt
+  1 dependency successfully precompiled in 12 seconds. 56 already precompiled.
+  1 dependency had output during precompilation:
+┌ SciMLBase → SciMLBaseChainRulesCoreExt
+│  [Output was shown above]
+└  
+Precompiling OptimizationOptimJL...
+   1119.4 ms  ✓ Setfield
+    800.5 ms  ? OptimizationBase
+    769.4 ms  ✓ FiniteDiff
+    781.8 ms  ? Optimization
+    491.1 ms  ✓ OptimizationBase → OptimizationFiniteDiffExt
+    632.1 ms  ✓ DifferentiationInterface → DifferentiationInterfaceFiniteDiffExt
+    NLSolversBase Being precompiled by another process (pid: 2794641, pidfile: /home/v/valdsbobes/.julia/compiled/v1.11/NLSolversBase/NEDD6_xTxTN.ji.pidfile)
+    679.0 ms  ✓ FiniteDiff → FiniteDiffSparseArraysExt
+  10075.8 ms  ✓ NLSolversBase
+    LineSearches Being precompiled by another machine (hostname: slurm109.ssc.wisc.edu, pid: 2661684, pidfile: /home/v/valdsbobes/.julia/compiled/v1.11/LineSearches/htmYa_xTxTN.ji.pidfile)
+  10092.4 ms  ✓ LineSearches
+   3258.2 ms  ✓ Optim
+    OptimizationOptimJL Being precompiled by another process (pid: 2793461, pidfile: /home/v/valdsbobes/.julia/compiled/v1.11/OptimizationOptimJL/d3R9i_xTxTN.ji.pidfile)
+Info Given OptimizationOptimJL was explicitly requested, output will be shown live [0K
+[0K┌ Warning: Module Optimization with build ID fafbfcfd-298b-29b4-4181-0bb617cc42fd is missing from the cache.
+[0K│ This may mean Optimization [7f7a1694-90dd-40f0-9382-eb1efda571ba] does not support precompilation but is imported by a module that does.
+[0K└ @ Base loading.jl:2541
+  19925.3 ms  ✓ OptimizationOptimJL
+  9 dependencies successfully precompiled in 47 seconds. 133 already precompiled.
+  2 dependencies precompiled but different versions are currently loaded. Restart julia to access the new versions. Otherwise, loading dependents of these packages may trigger further precompilation to work with the unexpected versions.
+  2 dependencies failed but may be precompilable after restarting julia
+  3 dependencies had output during precompilation:
+┌ OptimizationBase
+│  ┌ Warning: Module SciMLBase with build ID fafbfcfd-1200-ea43-967d-f490ad000ae4 is missing from the cache.
+│  │ This may mean SciMLBase [0bca4576-84f4-4d90-8ffe-ffa030f20462] does not support precompilation but is imported by a module that does.
+│  └ @ Base loading.jl:2541
+└  
+┌ Optimization
+│  ┌ Warning: Module SciMLBase with build ID fafbfcfd-1200-ea43-967d-f490ad000ae4 is missing from the cache.
+│  │ This may mean SciMLBase [0bca4576-84f4-4d90-8ffe-ffa030f20462] does not support precompilation but is imported by a module that does.
+│  └ @ Base loading.jl:2541
+└  
+┌ OptimizationOptimJL
+│  [Output was shown above]
+└  
+ERROR: LoadError: ParseError:
+# Error @ /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:456:5
+        
+    catch e
+#   └ ── Expected `end`
+Stacktrace:
+ [1] top-level scope
+   @ /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:456
+ [2] include(fname::String)
+   @ Main ./sysimg.jl:38
+ [3] top-level scope
+   @ none:6
+in expression starting at /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:456

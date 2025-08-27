@@ -1,0 +1,63 @@
+# Test Configuration for Production Run
+# Quick test with 3 iterations to validate functionality
+
+GlobalSearchResults:
+  latest_results_file: "src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results/mpi_search_results_job{job_id}_valid_objectives.csv"
+  job_id: 3056705
+  n_top_starts: 5  # Use fewer candidates for testing
+  config_path: "src/structural_model_heterogenous_preferences/distributed_mpi_search/mpi_search_config.yaml"
+
+ModelInputs:
+  config_path: "../distributed_mpi_search/mpi_search_config.yaml"
+  data_moments_yaml: "../../../data/results/data_moments/data_moments_2024.yaml"
+  weighting_matrix_csv: "../../../data/results/data_moments/smm_weighting_matrix_2024.csv"
+  sim_data_path: "../../../data/processed/simulation_scaffolding_2024.feather"
+  moment_filter: []
+
+OptimizationSettings:
+  optimizer: "LBFGS"
+  max_iterations: 3  # Very short test run
+  gradient_tolerance: 1.0e-7
+  function_tolerance: 1.0e-10
+  parameter_tolerance: 1.0e-10
+  parallel:
+    use_threads: true
+    max_threads: 4  # Limit threads for testing
+
+CandidateSelection:
+  quality_quantile: 0.3  # Use top 30% for more candidates in small test
+  diversity_method: "farthest_point"
+  random_seed: 12345
+
+Output:
+  output_directory: "output/"
+  log_directory: "logs/"
+  save_intermediate: false
+  export_formats:
+    - "csv"
+    - "json"
+  compress_results: false
+
+Logging:
+  level: "INFO"
+  console_timestamps: true
+  performance_logging: true
+  log_evaluations: false
+
+ErrorHandling:
+  max_retries: 2
+  evaluation_timeout: 60  # Shorter timeout for testing
+  continue_on_partial_failure: true
+  fallback_optimizer: "NelderMead"
+
+Performance:
+  monitor_memory: true
+  profile_timing: true
+  progress_interval: 1  # Report every iteration for testing
+  monitor_gc: false
+
+Validation:
+  validate_objective: true
+  validation_points: 2  # Fewer validation points
+  check_gradients: false
+  gradient_check_step: 1.0e-6

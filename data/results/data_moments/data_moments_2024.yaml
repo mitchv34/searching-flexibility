@@ -1,0 +1,30 @@
+# Data moments for year 2024
+# Generated on: 2025-08-26
+
+DataMoments:
+  mean_logwage: 3.113009
+  var_logwage: 0.471369
+  p90_p10_logwage: 1.475386
+  mean_alpha: 0.142603
+  var_alpha: 0.098305
+  inperson_share: 0.819605
+  hybrid_share: 0.075417
+  remote_share: 0.104978
+  agg_productivity: 1.148100
+  diff_alpha_high_lowpsi: 0.281633
+  market_tightness: 1.100000
+  job_finding_rate: null
+  diff_logwage_inperson_remote: -0.119534
+  wage_premium_high_psi: -0.090242
+  wage_slope_psi: 0.150739
+  wage_alpha: 0.580236
+  wage_alpha_curvature: -0.460163
+  mean_logwage_inperson: null
+  mean_logwage_remote: null
+  mean_logwage_RH_lowpsi: null
+  mean_logwage_RH_highpsi: null
+  mean_alpha_highpsi: 0.347603
+  mean_alpha_lowpsi: 0.065969
+  var_logwage_highpsi: null
+  var_logwage_lowpsi: null
+  ratio_var_logwage_high_lowpsi: null

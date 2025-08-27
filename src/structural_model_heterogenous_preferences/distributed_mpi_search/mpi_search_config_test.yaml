@@ -1,0 +1,92 @@
+# Short test configuration for timing
+ModelParameters:
+  β: 0.996
+  δ: 0.011
+  γ₀: 1.0
+  γ₁: 0.7668
+  κ₁: 1.0
+  A₀: 0.0
+  A₁: 1.0
+  b: 0.4
+  ξ: 0.5
+  κ₀: 850.0
+  ψ₀: 0.75
+  ϕ: 0.5
+  ν: 0.4
+  c₀: 5.0
+  χ: 8.0
+  aₕ: 2.0
+  bₕ: 5.0
+  μ: 0.05
+
+ModelGrids:
+  n_ψ: 100
+  ψ_min: 0.0
+  ψ_max: 1.0
+  ψ_data: /project/high_tech_ind/searching-flexibility/data/results/psi_distribution_Post_COVID.csv
+  ψ_column: psi
+  ψ_weight: probability_mass
+  n_h: 101
+  h_min: 0.05
+  h_max: 1.0
+
+ModelSolverOptions:
+  tol: 1e-6
+  max_iter: 25000
+  verbose: false
+  print_freq: 100
+  lambda_S_init: 0.01
+  lambda_u_init: 0.01
+  initial_S: null
+
+MPISearchConfig:
+  algorithm: "random_search"   # For test clarity (GA not implemented yet)
+  n_samples: 200                # Short run for timing
+  parameters:
+    names: ["aₕ", "bₕ", "c₀", "μ", "χ", "ν", "ψ₀", "ϕ", "κ₀"]
+    bounds:
+      aₕ: [1.0, 7.0]
+      bₕ: [1.0, 7.0]
+      c₀: [0.01, 1.0]
+      μ:  [0.01, 0.2]
+      χ:  [0.01, 8.0]
+      ν:  [0.1, 2.0]
+      ψ₀: [0.01, 0.95]
+      ϕ:  [0.1, 2.0]
+      κ₀: [15.0, 25.0]
+  target_moments:
+    data_file: "data/results/data_moments/data_moments_2024.yaml"
+    moments_to_use : [
+        # --- Skill Distribution Parameters (aₕ, bₕ) ---
+        "var_logwage",                  # Identifies the overall dispersion of the skill distribution.
+        "p90_p10_logwage",              # Identifies the shape/tails of the skill distribution, scale-invariant.
+
+        # --- Preference Parameters (c₀, μ, χ) ---
+        "diff_logwage_inperson_remote", # Identifies c₀ (amenity scale) via the selection-driven wage premium.
+        "mean_alpha",                    # Identifies μ (preference dispersion) via the quantity of interior solutions.
+        "hybrid_share",                 # Identifies μ (preference dispersion) via the quantity of interior solutions.
+        "remote_share",                 # Identifies χ (cost curvature) via the quantity of corner solutions.
+
+        # --- Technology Parameters (ψ₀, ν, ϕ) ---
+        "wage_premium_high_psi",        # Identifies ψ₀ (baseline remote tech) via the conditional wage premium.
+        "wage_slope_psi",               # Identifies ν (return to firm tech) via the wage-efficiency slope.
+        "diff_alpha_high_lowpsi",       # Identifies ϕ (sorting) via the difference in choices across firm types.
+
+        # --- Search & Matching Parameters (κ₀, ξ) ---
+        "market_tightness",             # Identifies κ₀ (vacancy cost) via the level of market friction.
+        # "job_finding_rate"              # Identifies ξ (bargaining power) via the worker's search outcome. #? To be added if needed
+    ]
+  moment_computation:
+    method: "simulation"
+    simulated_data: "data/processed/simulation_scaffolding_2024.feather"
+  search_options:
+    batch_size: 50   # Force several progress updates
+  output:
+    results_dir: "output/mpi_search_results"
+    checkpoint_frequency: 1000
+    save_all_results: false
+    detailed_logging: true
+  performance:
+    timing_diagnostics: true
+    memory_monitoring: false
+    convergence_tracking: true

@@ -1,0 +1,101 @@
+# Estimated Model Parameters for 2024
+# These are the "true" parameters estimated from data that serve as the baseline
+# for all counterfactual experiments. Estimated on: 2025-08-27
+
+ModelParameters:
+  # Production Function Parameters
+  A₀: 0.0                     #? Baseline productivity (CALIBRATED)
+  A1: 1.0                     #? Returns to skill (CALIBRATED)
+  
+  # Remote Work Technology Parameters (ESTIMATED)
+  ψ₀: 0.27293579622529596     #> Baseline remote work productivity  (ESTIMATED)
+  ϕ: 1.2051155260904085       #> Returns to skill in remote work    (ESTIMATED)
+  ν: 0.6531392801074976       #> Returns to firm-specific remote technology (ESTIMATED)
+  
+  # Work Arrangement Cost Parameters (ESTIMATED) 
+  c₀: 0.0007461093478651184   #> Baseline cost of in-person work    (ESTIMATED) 
+  χ: 11.010057139464875       #> Curvature of cost function (ESTIMATED) 
+  
+  # Preference Heterogeneity (ESTIMATED)
+  μ: 0.003998902359038344     #> Gumbel location parameter (preference shock scale) (ESTIMATED)
+  
+  # Search and Matching Parameters
+  κ₀: 128.0115582640700       #> Vacancy posting cost scale (ESTIMATED)
+  κ₁: 1.0                     #? Vacancy posting cost elasticity (CALIBRATED)
+  γ₀: 1.0                     #? Matching function scale (CALIBRATED)
+  γ₁: 0.5                     #? Matching function elasticity (CALIBRATED)
+  
+  # Market Structure Parameters
+  β: 0.996                    #? Discount factor (CALIBRATED)
+  δ: 0.011                    #? Job separation rate (CALIBRATED)
+  b: 0.1                      #? Unemployment benefits (CALIBRATED)
+  ξ: 0.2                      #? Worker bargaining power (CALIBRATED)
+  
+  # Skill Distribution Parameters (ESTIMATED)
+  aₕ: 1.5714087805606658      #> Beta distribution shape parameter α (ESTIMATED)
+  bₕ: 1.0930078058826707      #> Beta distribution shape parameter β (ESTIMATED)
+
+ModelGrids:
+  # ψ-grid (remote productivity distribution)
+  n_psi: 100
+  psi_min: 0.0
+  psi_max: 1.0
+  psi_data: data/results/psi_distribution_Pre_COVID.csv
+  psi_column: psi
+  psi_weight: probability_mass
+  
+  # h-grid (skill distribution) 
+  n_h: 101
+  h_min: 0.05
+  h_max: 1.0
+
+ModelSolverOptions:
+  # Solver Configuration for Baseline Model
+  tol: 1e-8              # Convergence tolerance
+  max_iter: 50000        # Maximum iterations
+  verbose: false         # Print convergence info
+  print_freq: 50         # Print frequency for verbose mode
+  lambda_S_init: 0.01    # Initial dampening parameter for surplus
+  lambda_u_init: 0.01    # Initial dampening parameter for unemployment
+  initial_S: null        # Initial surplus matrix (null for default)
+
+# Metadata about estimation
+EstimationInfo:
+  estimation_date: "2025-08-27"
+  estimation_method: "MPI distributed search + local refinement"
+  data_year: 2024
+  objective_function: "Method of moments"
+  convergence_status: "converged"
+  final_objective_value: null  # To be filled when we have the final estimate
+  
+  # Parameters that were estimated vs calibrated
+  estimated_parameters:
+    - "psi_0"     # Remote work baseline productivity
+    - "phi"       # Returns to skill in remote work  
+    - "nu"        # Returns to firm remote technology
+    - "c0"        # Baseline cost of in-person work
+    - "chi"       # Cost function curvature
+    - "mu"        # Preference shock scale
+    - "kappa0"    # Vacancy posting costs
+    - "a_h"       # Skill distribution shape α
+    - "b_h"       # Skill distribution shape β
+    
+  calibrated_parameters:
+    - "A0"        # Baseline productivity
+    - "A1"        # Returns to skill
+    - "kappa1"    # Vacancy posting elasticity
+    - "gamma0"    # Matching function scale
+    - "gamma1"    # Matching function elasticity  
+    - "beta"      # Discount factor
+    - "delta"     # Job separation rate
+    - "b"         # Unemployment benefits
+    - "xi"        # Worker bargaining power
+    
+  # Notes about parameter interpretation
+  notes: |
+    - All monetary values are normalized relative to baseline wage
+    - Remote work technology parameters (psi_0, phi, nu) jointly determine
+      the productivity of remote work arrangements
+    - Cost parameters (c0, chi) determine the disutility of in-person work
+    - Skill distribution (a_h, b_h) governs worker heterogeneity
+    - Search frictions (kappa0) affect vacancy posting and job finding rates

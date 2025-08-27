@@ -1,0 +1,154 @@
+# MPI Distributed Search Configuration
+# This file contains the configuration for the distributed MPI parameter search
+
+# Base model configuration - inherited from main model
+ModelParameters:
+  # Calibrated Parameters (Group 1)
+  β: 0.996
+  δ: 0.011
+  γ₀: 1.0
+  γ₁: 0.7668      # FINAL: Updated with your rigorous HSW estimate
+  κ₁: 1.0
+  A₀: 0.0        # Normalized for identification
+  A₁: 1.0        # Normalized for identification
+  b: 0.4         # Calibrated Surplus Replacement Rate
+  ξ: 0.2         # Kept fixed as per baseline (can be moved to estimation)
+
+  # Initial guesses for estimated parameters (will be ignored by search, but good for single runs)
+  κ₀: 850.0
+  ψ₀: 0.75      
+  ϕ: 0.5
+  ν: 0.4
+  c₀: 5.0       
+  χ: 8.0       
+  aₕ: 2.0
+  bₕ: 5.0
+  μ: 0.05
+  
+ModelGrids:
+  # Discretized Grids 
+  n_ψ: 100
+  ψ_min: 0.0
+  ψ_max: 1.0
+  ψ_data: /project/high_tech_ind/searching-flexibility/data/results/psi_distribution_Post_COVID.csv
+  ψ_column: psi
+  ψ_weight: probability_mass
+  n_h: 101
+  h_min: 0.05
+  h_max: 1.0
+
+ModelSolverOptions:
+  # Solver Configuration - stricter for final results
+  tol: 1e-6               # High precision convergence tolerance
+  max_iter: 25_000        # Allow more iterations for convergence
+  verbose: false          # Print convergence info
+  print_freq: 100         # Print frequency for verbose mode
+  lambda_S_init: 0.01     # Initial dampening parameter for surplus
+  lambda_u_init: 0.01     # Initial dampening parameter for unemployment
+  initial_S: null         # Initial surplus matrix (null for default)
+
+MPISearchConfig:
+  # Search algorithm configuration
+  algorithm: "genetic_algorithm"  # Options: "random_search", "genetic_algorithm", "bayesian_optimization"
+  n_samples: 100000            # Total number of parameter vectors to evaluate (no underscores for YAML)
+  
+  # Parameter search space
+  parameters:
+    names: ["aₕ", "bₕ", "c₀", "μ", "χ", "ν", "ψ₀", "ϕ", "κ₀"]
+    bounds:
+      # aₕ: [1.0, 10.0]
+      # bₕ: [1.0, 10.0]
+      c₀: [0.0001, 2.0]
+      μ:  [0.0001, 0.2]
+      # χ:  [0.0005, 10.0]
+      # ν:  [0.01, 3.0]
+      # ψ₀: [0.0, 3.0]
+      # ϕ:  [0.01, 3.0]
+      κ₀: [1.0, 300.0]
+      # New bounds centered around last run's best values
+      aₕ: [0.01, 2.0]      # Center around 1.64
+      bₕ: [0.01, 2.0]      # Center around 1.28
+      # c₀: [0.0005, 0.005] # Center around 0.002
+      # μ: [0.001, 0.01]    # Center around 0.004
+      χ: [4.0, 12.0]       # Center around 4.9
+      ν: [0.01, 1.0]       # Center around 0.39
+      ψ₀: [0.01, 1.0]      # Center around 0.42
+      ϕ: [0.5, 1.5]       # Center around 0.85
+      # κ₀: [70, 130]      # Center around 120
+      
+  # Target moments for optimization
+  target_moments:
+    data_file: "data/results/data_moments/data_moments_2024.yaml"
+    moments_to_use:
+      # - mean_logwage
+      - var_logwage
+      - mean_alpha
+      - var_alpha
+      - inperson_share
+      - remote_share
+      - p90_p10_logwage
+      # - agg_productivity
+      - diff_alpha_high_lowpsi
+      - wage_premium_high_psi
+      # - wage_slope_psi
+      - market_tightness
+      - wage_alpha
+      - wage_alpha_curvature
+  # Moment Computation
+  moment_computation:
+    method: "simulation"  # Options: "analytic", "simulation"
+    simulated_data: "data/processed/simulation_scaffolding_2024.feather"
+
+  # Advanced search options
+  search_options:
+    # LARGE GA SEARCH CONFIG tuned for 32 workers
+    # Approx evaluations = population_size * n_generations (before early stopping)
+    population_size: 320            # 10 per worker; good load balance
+    mutation_rate: 0.22             # Slightly higher to maintain diversity
+    mutation_scale: 0.12            # Explicit (default was 0.1)
+    crossover_rate: 0.85
+    n_generations: 120              # 38,400 potential evaluations
+    elite_fraction: 0.08            # Keep some turnover
+    tournament_size: 3
+    early_stopping:
+      enabled: true
+      patience: 20                  # Allow longer exploration
+      min_improvement: 5e-5         # Smaller threshold for large run
+      mode: "absolute"
+      warmup_generations: 15        # Delay monitoring to build diversity
+    auto_bound_expansion:
+      enabled: true
+      edge_fraction: 0.02
+      population_edge_share: 0.18   # Require broader pressure to expand
+      min_generations: 8
+      expansion_factor: 1.6         # Slightly stronger expansions
+      max_expansions_per_param: 6
+      global_upper_caps:
+        κ₀: 600.0
+      global_lower_caps:
+        c₀: 0.00005
+        aₕ: 0.000001
+        bₕ: 0.000001
+
+    # Random search settings (unused for GA but kept for compatibility)
+    sampling_method: "sobol"
+    batch_size: 1000
+    
+  # Bayesian optimization settings (if algorithm == "bayesian_optimization")
+  n_initial_points: 100
+  acquisition_function: "expected_improvement"
+    
+  # Output and logging
+  output:
+    results_dir: "src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results"
+    checkpoint_frequency: 1000   # Save progress every N evaluations
+    save_all_results: false       # Save all parameter vectors and objectives
+    detailed_logging: true       # Verbose progress logging
+  valid_objectives_csv_template: "src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results/mpi_search_results_job{job_id}_valid_objectives.csv"  # Produced at end of each run
+    
+  # Performance monitoring
+  performance:
+    timing_diagnostics: true
+    memory_monitoring: true
+    convergence_tracking: true
+  

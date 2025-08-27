@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple, List
 from dataclasses import dataclass, field, asdict
 
 import polars as pl
@@ -1073,89 +1073,9 @@ def cps_pipeline(cfg: Config) -> Path:
     cps = assign_teleworkability(cps, tw_path, "OCCSOC", tw_map_cfg, out_prefix="TELEWORKABLE_OCSSOC")
     logger.info(f"CPS: Added SOC groupings and teleworkability")
 
+    
     # Ensure cell components exist before building cell_id
-    # occ2_harmonized from OCCSOC (2-digit SOC major group)
-    if "occ2_harmonized" not in cps.columns and "OCCSOC" in cps.columns:
-        cps = cps.with_columns(
-            pl.when(pl.col("OCCSOC").is_not_null())
-              .then(pl.col("OCCSOC").cast(pl.Utf8).str.slice(0, 2))
-              .otherwise(pl.lit(None))
-              .alias("occ2_harmonized")
-        )
-
-    # ind_broad from INDNAICS (2-digit NAICS -> sector)
-    if "ind_broad" not in cps.columns and "INDNAICS" in cps.columns:
-        ind2 = pl.col("INDNAICS").cast(pl.Utf8).str.strip_chars().str.slice(0, 2)
-        cps = cps.with_columns(
-            pl.when(ind2 == "11").then(pl.lit("agriculture_forestry_fishing"))
-             .when(ind2 == "21").then(pl.lit("mining_oil_gas"))
-             .when(ind2 == "22").then(pl.lit("utilities"))
-             .when(ind2 == "23").then(pl.lit("construction"))
-             .when(ind2.is_in(["31", "32", "33"])).then(pl.lit("manufacturing"))
-             .when(ind2 == "42").then(pl.lit("wholesale_trade"))
-             .when(ind2.is_in(["44", "45"])).then(pl.lit("retail_trade"))
-             .when(ind2.is_in(["48", "49"])).then(pl.lit("transportation_warehousing"))
-             .when(ind2 == "51").then(pl.lit("information"))
-             .when(ind2 == "52").then(pl.lit("finance_insurance"))
-             .when(ind2 == "53").then(pl.lit("real_estate_rental"))
-             .when(ind2 == "54").then(pl.lit("professional_scientific_technical"))
-             .when(ind2 == "55").then(pl.lit("management_companies"))
-             .when(ind2 == "56").then(pl.lit("administrative_support_waste"))
-             .when(ind2 == "61").then(pl.lit("educational_services"))
-             .when(ind2 == "62").then(pl.lit("health_care_social_assistance"))
-             .when(ind2 == "71").then(pl.lit("arts_entertainment_recreation"))
-             .when(ind2 == "72").then(pl.lit("accommodation_food_services"))
-             .when(ind2 == "81").then(pl.lit("other_services"))
-             .when(ind2 == "92").then(pl.lit("public_administration"))
-             .otherwise(pl.lit(None))
-             .alias("ind_broad")
-        )
-
-    # ftpt from UHRSWORKT (>=35 fulltime)
-    if "ftpt" not in cps.columns and "UHRSWORKT" in cps.columns:
-        cps = cps.with_columns(
-            pl.when(pl.col("UHRSWORKT").cast(pl.Float64) >= 35)
-              .then(pl.lit("fulltime"))
-              .otherwise(pl.lit("parttime"))
-              .alias("ftpt")
-        )
-
-    # edu3 from EDUC (coarse bins; adjust if you have a detailed codebook)
-    if "edu3" not in cps.columns and "EDUC" in cps.columns:
-        cps = cps.with_columns(
-            pl.when(pl.col("EDUC") < 111).then(pl.lit("lt_ba"))     # HS or some college
-             .when(pl.col("EDUC") < 123).then(pl.lit("ba"))         # Bachelor's
-             .otherwise(pl.lit("adv"))                              # Advanced
-             .alias("edu3")
-        )
-
-    # age4 from AGE (25–34, 35–44, 45–54, 55–64)
-    if "age4" not in cps.columns and "AGE" in cps.columns:
-        cps = cps.with_columns(
-            pl.when(pl.col("AGE") < 25).then(pl.lit(None))
-             .when(pl.col("AGE") <= 34).then(pl.lit("25-34"))
-             .when(pl.col("AGE") <= 44).then(pl.lit("35-44"))
-             .when(pl.col("AGE") <= 54).then(pl.lit("45-54"))
-             .when(pl.col("AGE") <= 64).then(pl.lit("55-64"))
-             .otherwise(pl.lit(None))
-             .alias("age4")
-        )
-
-    # sex from SEX (1 male, 2 female)
-    if "sex" not in cps.columns and "SEX" in cps.columns:
-        cps = cps.with_columns(
-            pl.when(pl.col("SEX") == 1).then(pl.lit("male"))
-             .when(pl.col("SEX") == 2).then(pl.lit("female"))
-             .otherwise(pl.lit(None))
-             .alias("sex")
-        )
-
-    # state from STATEFIP
-    if "state" not in cps.columns and "STATEFIP" in cps.columns:
-        cps = cps.with_columns(
-            pl.col("STATEFIP").cast(pl.Utf8).str.pad_start(2, "0").alias("state")
-        )
-
+    cps = _ensure_cell_components(cps)
 
     # Add cell_id creation early for ATUS join compatibility
     cps = _derive_cell_components(cps)
@@ -1298,13 +1218,123 @@ def cps_pipeline(cfg: Config) -> Path:
 
     return out_path
 
+def _ensure_cell_components(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Ensures the presence of key derived columns in a Polars DataFrame based on existing raw columns.
+    This function checks for the existence of several harmonized or derived columns commonly used in labor force and demographic analysis.
+    If a derived column is missing but its source column is present, the function computes and adds the derived column to the DataFrame.
+    Derived columns and their logic:
+    - 'occ2_harmonized': Extracts the 2-digit SOC major group from 'OCCSOC'.
+    - 'ind_broad': Maps the 2-digit NAICS code from 'INDNAICS' to a broad industry sector.
+    - 'ftpt': Categorizes 'UHRSWORKT' as 'fulltime' (>=35 hours) or 'parttime'.
+    - 'edu3': Bins 'EDUC' into 'lt_ba' (less than bachelor's), 'ba' (bachelor's), or 'adv' (advanced).
+    - 'age4': Bins 'AGE' into four groups: '25-34', '35-44', '45-54', '55-64'.
+    - 'sex': Maps 'SEX' (1/2) to 'male'/'female'.
+    - 'state': Pads 'STATEFIP' to two digits as a string.
+    Parameters
+    ----------
+    df : pl.DataFrame
+        Input DataFrame containing raw columns.
+    Returns
+    -------
+    pl.DataFrame
+        DataFrame with the required derived columns added if they were missing.
+    """
+    
+    # occ2_harmonized from OCCSOC (2-digit SOC major group)
+    if "occ2_harmonized" not in df.columns and "OCCSOC" in df.columns:
+        df = df.with_columns(
+            pl.when(pl.col("OCCSOC").is_not_null())
+                .then(pl.col("OCCSOC").cast(pl.Utf8).str.slice(0, 2))
+                .otherwise(pl.lit(None))
+                .alias("occ2_harmonized")
+        )
+
+    # ind_broad from INDNAICS (2-digit NAICS -> sector)
+    if "ind_broad" not in df.columns and "INDNAICS" in df.columns:
+        ind2 = pl.col("INDNAICS").cast(pl.Utf8).str.strip_chars().str.slice(0, 2)
+        df = df.with_columns(
+            pl.when(ind2 == "11").then(pl.lit("agriculture_forestry_fishing"))
+                .when(ind2 == "21").then(pl.lit("mining_oil_gas"))
+                .when(ind2 == "22").then(pl.lit("utilities"))
+                .when(ind2 == "23").then(pl.lit("construction"))
+                .when(ind2.is_in(["31", "32", "33"])).then(pl.lit("manufacturing"))
+                .when(ind2 == "42").then(pl.lit("wholesale_trade"))
+                .when(ind2.is_in(["44", "45"])).then(pl.lit("retail_trade"))
+                .when(ind2.is_in(["48", "49"])).then(pl.lit("transportation_warehousing"))
+                .when(ind2 == "51").then(pl.lit("information"))
+                .when(ind2 == "52").then(pl.lit("finance_insurance"))
+                .when(ind2 == "53").then(pl.lit("real_estate_rental"))
+                .when(ind2 == "54").then(pl.lit("professional_scientific_technical"))
+                .when(ind2 == "55").then(pl.lit("management_companies"))
+                .when(ind2 == "56").then(pl.lit("administrative_support_waste"))
+                .when(ind2 == "61").then(pl.lit("educational_services"))
+                .when(ind2 == "62").then(pl.lit("health_care_social_assistance"))
+                .when(ind2 == "71").then(pl.lit("arts_entertainment_recreation"))
+                .when(ind2 == "72").then(pl.lit("accommodation_food_services"))
+                .when(ind2 == "81").then(pl.lit("other_services"))
+                .when(ind2 == "92").then(pl.lit("public_administration"))
+                .otherwise(pl.lit(None))
+                .alias("ind_broad")
+        )
+
+    # ftpt from UHRSWORKT (>=35 fulltime)
+    if "ftpt" not in df.columns and "UHRSWORKT" in df.columns:
+        df = df.with_columns(
+            pl.when(pl.col("UHRSWORKT").cast(pl.Float64) >= 35)
+                .then(pl.lit("fulltime"))
+                .otherwise(pl.lit("parttime"))
+                .alias("ftpt")
+        )
+
+    # edu3 from EDUC (coarse bins; adjust if you have a detailed codebook)
+    if "edu3" not in df.columns and "EDUC" in df.columns:
+        df = df.with_columns(
+            pl.when(pl.col("EDUC") < 111).then(pl.lit("lt_ba"))     # HS or some college
+                .when(pl.col("EDUC") < 123).then(pl.lit("ba"))         # Bachelor's
+                .otherwise(pl.lit("adv"))                              # Advanced
+                .alias("edu3")
+        )
+
+    # age4 from AGE (25–34, 35–44, 45–54, 55–64)
+    if "age4" not in df.columns and "AGE" in df.columns:
+        df = df.with_columns(
+            pl.when(pl.col("AGE") < 25).then(pl.lit(None))
+                .when(pl.col("AGE") <= 34).then(pl.lit("25-34"))
+                .when(pl.col("AGE") <= 44).then(pl.lit("35-44"))
+                .when(pl.col("AGE") <= 54).then(pl.lit("45-54"))
+                .when(pl.col("AGE") <= 64).then(pl.lit("55-64"))
+                .otherwise(pl.lit(None))
+                .alias("age4")
+        )
+
+    # sex from SEX (1 male, 2 female)
+    if "sex" not in df.columns and "SEX" in df.columns:
+        df = df.with_columns(
+            pl.when(pl.col("SEX") == 1).then(pl.lit("male"))
+                .when(pl.col("SEX") == 2).then(pl.lit("female"))
+                .otherwise(pl.lit(None))
+                .alias("sex")
+        )
+
+    # state from STATEFIP
+    if "state" not in df.columns and "STATEFIP" in df.columns:
+        df = df.with_columns(
+            pl.col("STATEFIP").cast(pl.Utf8).str.pad_start(2, "0").alias("state")
+        )
+    return df
+
+
 
 def _derive_cell_components(df: pl.DataFrame) -> pl.DataFrame:
     """Derive cell_id, psi, and high_psi_flag from demographic variables"""
     
     # Create cell_id from key demographic variables
     # Format: "occ2|ind_broad|ftpt|edu3|age4|sex|state"
-    cell_vars = ["occ2_harmonized", "ind_broad", "ftpt", "edu3", "age4", "sex", "state"]
+    # cell_vars = ["occ2_harmonized", "ind_broad", "ftpt", "edu3", "age4", "sex", "state"]
+    # cell_vars = ["occ2_harmonized", "ind_broad", "ftpt", "edu3", "age4", "sex"]
+    # cell_vars = ["occ2_harmonized", "ftpt", "edu3", "age4", "sex"]
+    cell_vars = ["occ2_harmonized", "ftpt", "edu3", "sex"]
     
     # Ensure all required variables exist, convert to string
     df_with_strings = df
@@ -1385,15 +1415,396 @@ def _export_stata(df: pl.DataFrame, file_path: Path) -> None:
     logger.info(f"Exported {len(df):,} rows to {file_path}")
 
 
+def diagnose_bridge(bridge: pl.DataFrame, cfg: Config, logger=None) -> None:
+    """Comprehensive diagnostics for bridge lambda results."""
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    try:
+        # 1) Non-finite λ counts
+        bad = bridge.select([
+            (~pl.col("lambda_remote").is_finite()).sum().alias("bad_remote"),
+            (~pl.col("lambda_hybrid").is_finite()).sum().alias("bad_hybrid"),
+            (~pl.col("lambda_inperson").is_finite()).sum().alias("bad_inperson"),
+        ]).to_dicts()[0]
+        logger.info(f"Bridge: λ non-finite counts — remote={bad['bad_remote']}, hybrid={bad['bad_hybrid']}, inperson={bad['bad_inperson']} (target=0)")
+
+        # 2) Overall medians and central spread
+        finite = bridge.filter(
+            (pl.col("cps_w") > 0)
+            & pl.all_horizontal([
+                pl.col("lambda_remote").is_finite(),
+                pl.col("lambda_hybrid").is_finite(),
+                pl.col("lambda_inperson").is_finite(),
+                pl.col("worker_share_remote").is_finite(),
+                pl.col("worker_share_hybrid").is_finite(),
+                pl.col("worker_share_inperson").is_finite(),
+                pl.col("worker_share_remote_from_atus").is_finite(),
+                pl.col("worker_share_hybrid_from_atus").is_finite(),
+                pl.col("worker_share_inperson_from_atus").is_finite(),
+            ])
+        )
+
+        summ = finite.select([
+            pl.col("lambda_remote").quantile(0.1).alias("r_p10"),
+            pl.col("lambda_remote").median().alias("r_p50"),
+            pl.col("lambda_remote").quantile(0.9).alias("r_p90"),
+            pl.col("lambda_hybrid").quantile(0.1).alias("h_p10"),
+            pl.col("lambda_hybrid").median().alias("h_p50"),
+            pl.col("lambda_hybrid").quantile(0.9).alias("h_p90"),
+            pl.col("lambda_inperson").quantile(0.1).alias("i_p10"),
+            pl.col("lambda_inperson").median().alias("i_p50"),
+            pl.col("lambda_inperson").quantile(0.9).alias("i_p90"),
+        ]).to_dicts()[0]
+        logger.info(
+            "Bridge: λ percentiles — "
+            f"\n\t\t\t\tremote [p10={summ['r_p10']:.3f}, p50={summ['r_p50']:.3f}, p90={summ['r_p90']:.3f}] | "
+            f"\n\t\t\t\thybrid [p10={summ['h_p10']:.3f}, p50={summ['h_p50']:.3f}, p90={summ['h_p90']:.3f}] | "
+            f"\n\t\t\t\tinperson [p10={summ['i_p10']:.3f}, p50={summ['i_p50']:.3f}, p90={summ['i_p90']:.3f}] "
+            "\n\t\t\t\t\t(expect medians ≈ 1; in-person usually closest to 1)"
+        )
+
+        # 3) Medians by occupation (spot centering/drift)
+        by_occ = (
+            finite.group_by("occ2_harmonized")
+                .agg([
+                    pl.col("lambda_remote").median().alias("med_r"),
+                    pl.col("lambda_hybrid").median().alias("med_h"),
+                    pl.col("lambda_inperson").median().alias("med_i"),
+                ])
+                .sort("occ2_harmonized")
+        )
+        med_occ = by_occ.select([
+            pl.col("med_r").median().alias("occ_med_r"),
+            pl.col("med_h").median().alias("occ_med_h"),
+            pl.col("med_i").median().alias("occ_med_i"),
+        ]).to_dicts()[0]
+        logger.info(f"Bridge: median of occ-level medians — remote={med_occ['occ_med_r']:.3f}, hybrid={med_occ['occ_med_h']:.3f}, inperson={med_occ['occ_med_i']:.3f}")
+
+        # 4) How well ATUS-implied worker shares match CPS (weighted)
+        def share_metrics(k: str) -> dict:
+            a = f"worker_share_{k}"
+            p = f"worker_share_{k}_from_atus"
+            w = "cps_w"
+            # avoid division by zero in MAPE
+            eps = 1e-8
+            m = finite.select([
+                (pl.col(w)).sum().alias("W"),
+                (pl.col(w) * (pl.col(p) - pl.col(a)).abs()).sum().alias("WMAE_num"),
+                (pl.col(w) * ((pl.col(p) - pl.col(a))**2)).sum().alias("WRMSE_num"),
+                (pl.col(w) * (pl.col(p) / (pl.col(a) + eps) - 1).abs()).sum().alias("WMAPE_num"),
+                # unweighted Pearson correlation (quick signal)
+                pl.corr(pl.col(p), pl.col(a)).alias("corr"),
+            ]).to_dicts()[0]
+            W = m["W"] if m["W"] and m["W"] > 0 else 1.0
+            return {
+                "WMAE": m["WMAE_num"] / W,
+                "WRMSE": (m["WRMSE_num"] / W) ** 0.5,
+                "WMAPE": m["WMAPE_num"] / W,
+                "corr": m["corr"],
+            }
+
+        for k in ["remote", "hybrid", "inperson"]:
+            mk = share_metrics(k)
+            logger.info(
+                f"Bridge fit ({k}): WMAE={mk['WMAE']:.4f}, WMAPE={mk['WMAPE']:.3f}, WRMSE={mk['WRMSE']:.4f}, corr={mk['corr']:.3f}"
+            )
+
+        # 5) Worst cells (so you can inspect outliers)
+        worst = (
+            finite
+            .with_columns([
+                (pl.col("worker_share_remote_from_atus") - pl.col("worker_share_remote")).abs().alias("ae_remote"),
+                (pl.col("worker_share_hybrid_from_atus") - pl.col("worker_share_hybrid")).abs().alias("ae_hybrid"),
+                (pl.col("worker_share_inperson_from_atus") - pl.col("worker_share_inperson")).abs().alias("ae_inperson"),
+            ])
+            .with_columns([
+                (pl.col("ae_remote") + pl.col("ae_hybrid") + pl.col("ae_inperson")).alias("ae_sum"),
+            ])
+            .sort(["ae_sum"], descending=True)
+            .head(10)
+        )
+        logger.info("Bridge: top 10 cell×years by total absolute share error (remote+hybrid+inperson):")
+        for r in worst.select(["YEAR", "cell_id", "occ2_harmonized", "ae_sum"]).to_dicts():
+            logger.info(f"  YEAR={r['YEAR']}, cell_id={r['cell_id']}, occ2={r['occ2_harmonized']}, abs_err_sum={r['ae_sum']:.4f}")
+
+        # 6) (Optional) save a small CSV of diagnostics
+        # worst.write_csv((cfg.processed_dir / "empirical" / "bridge_outliers_top10.csv"))
+
+    except Exception as e:
+        logger.warning(f"Bridge diagnostics failed: {e}")
+
+def build_bridge_lambdas(
+    cps_mi: pl.DataFrame,
+    atus_cell: pl.DataFrame,
+    eps: float = 1e-6,
+    clip: Tuple[float, float] = (0.5, 2.0),
+    pool_years: List[int] = [2022, 2023, 2024, 2025],
+    min_eff: int = 15,
+) -> pl.DataFrame:
+    """
+    Bridge day- to worker-shares with λ at key level (occ2 × edu3 × sex), 2022+.
+
+    Ladder for day shares (per cell×year):
+        yearly (if n_eff_diaries ≥ min_eff) → pooled-by-cell over pool_years →
+        pooled-by-occ2 over pool_years → global pooled fallback.
+    """
+
+    # ---------- Meta ----------
+    occ_meta = cps_mi.select(["YEAR", "cell_id", "occ2_harmonized"]).unique()
+    key_map  = cps_mi.select(["cell_id", "occ2_harmonized", "edu3", "sex"]).unique()
+
+    # ---------- CPS worker shares at cell×year (observed; 2022+) ----------
+    cps_obs = cps_mi.filter(pl.col("YEAR") >= 2022)
+    worker = (
+        cps_obs
+        .group_by(["YEAR", "cell_id"])
+        .agg([
+            ((pl.col("FULL_REMOTE")   * pl.col("cps_weight")).sum() / pl.col("cps_weight").sum()).alias("worker_share_remote"),
+            ((pl.col("HYBRID")        * pl.col("cps_weight")).sum() / pl.col("cps_weight").sum()).alias("worker_share_hybrid"),
+            ((pl.col("FULL_INPERSON") * pl.col("cps_weight")).sum() / pl.col("cps_weight").sum()).alias("worker_share_inperson"),
+            pl.col("cps_weight").sum().alias("cps_w"),
+        ])
+        .with_columns((pl.col("worker_share_remote")+pl.col("worker_share_hybrid")+pl.col("worker_share_inperson")).alias("_sw"))
+        .with_columns([
+            (pl.col("worker_share_remote")   / pl.col("_sw")).alias("worker_share_remote"),
+            (pl.col("worker_share_hybrid")   / pl.col("_sw")).alias("worker_share_hybrid"),
+            (pl.col("worker_share_inperson") / pl.col("_sw")).alias("worker_share_inperson"),
+        ])
+        .drop("_sw")
+    )
+
+    # ---------- ATUS day shares & fallbacks ----------
+    # yearly (2022+)
+    day_y = (
+        atus_cell
+        .filter(pl.col("YEAR") >= 2022)
+        .select(["YEAR", "cell_id", "share_remote_day", "share_hybrid_day", "share_inperson_day"])
+    )
+
+    # pooled by cell across pool_years
+    day_pool_cell = (
+        atus_cell
+        .filter(pl.col("YEAR").is_in(pool_years))
+        .group_by("cell_id")
+        .agg([
+            pl.col("share_remote_day").mean().alias("share_remote_day_pool_cell"),
+            pl.col("share_hybrid_day").mean().alias("share_hybrid_day_pool_cell"),
+            pl.col("share_inperson_day").mean().alias("share_inperson_day_pool_cell"),
+        ])
+    )
+
+    # pooled by occ2 across pool_years
+    day_occ2 = (
+        atus_cell
+        .filter(pl.col("YEAR").is_in(pool_years))
+        .join(occ_meta.select(["YEAR","cell_id","occ2_harmonized"]).unique(), on=["YEAR","cell_id"], how="left")
+        .group_by("occ2_harmonized")
+        .agg([
+            pl.col("share_remote_day").mean().alias("share_remote_day_pool_occ2"),
+            pl.col("share_hybrid_day").mean().alias("share_hybrid_day_pool_occ2"),
+            pl.col("share_inperson_day").mean().alias("share_inperson_day_pool_occ2"),
+        ])
+    )
+
+    # global pooled (last resort)
+    gvals = (
+        atus_cell
+        .filter(pl.col("YEAR").is_in(pool_years))
+        .select([
+            pl.col("share_remote_day").mean().alias("g_remote"),
+            pl.col("share_hybrid_day").mean().alias("g_hybrid"),
+            pl.col("share_inperson_day").mean().alias("g_inperson"),
+        ])
+        .to_dicts()[0]
+    )
+
+    # effective diaries for gating yearly vs pooled
+    neff = atus_cell.select(["YEAR","cell_id","n_eff_diaries"]).unique()
+
+    # combine ladder at cell×year
+    df = (
+        worker
+        .join(day_y, on=["YEAR","cell_id"], how="left")
+        .join(day_pool_cell, on="cell_id", how="left")
+        .join(occ_meta.select(["YEAR","cell_id","occ2_harmonized"]).unique(), on=["YEAR","cell_id"], how="left")
+        .join(day_occ2, on="occ2_harmonized", how="left")
+        .join(neff, on=["YEAR","cell_id"], how="left")
+        .with_columns([
+            pl.when(pl.col("n_eff_diaries") >= min_eff).then(pl.col("share_remote_day")).otherwise(pl.col("share_remote_day_pool_cell")).alias("share_remote_day_eff"),
+            pl.when(pl.col("n_eff_diaries") >= min_eff).then(pl.col("share_hybrid_day")).otherwise(pl.col("share_hybrid_day_pool_cell")).alias("share_hybrid_day_eff"),
+            pl.when(pl.col("n_eff_diaries") >= min_eff).then(pl.col("share_inperson_day")).otherwise(pl.col("share_inperson_day_pool_cell")).alias("share_inperson_day_eff"),
+        ])
+        .with_columns([
+            pl.coalesce([pl.col("share_remote_day_eff"),   pl.col("share_remote_day_pool_occ2"),   pl.lit(gvals["g_remote"])]).alias("share_remote_day"),
+            pl.coalesce([pl.col("share_hybrid_day_eff"),   pl.col("share_hybrid_day_pool_occ2"),   pl.lit(gvals["g_hybrid"])]).alias("share_hybrid_day"),
+            pl.coalesce([pl.col("share_inperson_day_eff"), pl.col("share_inperson_day_pool_occ2"), pl.lit(gvals["g_inperson"])]).alias("share_inperson_day"),
+        ])
+        .drop([
+            "share_remote_day_eff","share_hybrid_day_eff","share_inperson_day_eff",
+            "share_remote_day_pool_cell","share_hybrid_day_pool_cell","share_inperson_day_pool_cell",
+            "share_remote_day_pool_occ2","share_hybrid_day_pool_occ2","share_inperson_day_pool_occ2",
+        ])
+        .with_columns((pl.col("share_remote_day")+pl.col("share_hybrid_day")+pl.col("share_inperson_day")).alias("_ss"))
+        .with_columns([
+            (pl.col("share_remote_day")  / pl.col("_ss")).alias("share_remote_day"),
+            (pl.col("share_hybrid_day")  / pl.col("_ss")).alias("share_hybrid_day"),
+            (pl.col("share_inperson_day")/ pl.col("_ss")).alias("share_inperson_day"),
+        ])
+        .drop("_ss")
+    )
+
+    # ---------- Key-level aggregation (OCC2×EDU3×SEX) ----------
+    # ensure W_worked exists (fallback to 1.0 if not carried over)
+    if "W_worked" not in atus_cell.columns:
+        atus_cell = atus_cell.with_columns(pl.lit(1.0).alias("W_worked"))
+
+    # key×year CPS worker shares
+    wk_key = (
+        cps_mi.filter(pl.col("YEAR") >= 2022)
+              .join(key_map, on="cell_id", how="left")
+              .group_by(["YEAR","occ2_harmonized","edu3","sex"])
+              .agg([
+                  ((pl.col("FULL_REMOTE")   * pl.col("cps_weight")).sum() / pl.col("cps_weight").sum()).alias("worker_share_remote"),
+                  ((pl.col("HYBRID")        * pl.col("cps_weight")).sum() / pl.col("cps_weight").sum()).alias("worker_share_hybrid"),
+                  ((pl.col("FULL_INPERSON") * pl.col("cps_weight")).sum() / pl.col("cps_weight").sum()).alias("worker_share_inperson"),
+                  pl.col("cps_weight").sum().alias("cps_w_key"),
+              ])
+              .with_columns((pl.col("worker_share_remote")+pl.col("worker_share_hybrid")+pl.col("worker_share_inperson")).alias("_sw"))
+              .with_columns([
+                  (pl.col("worker_share_remote")  / pl.col("_sw")).alias("worker_share_remote"),
+                  (pl.col("worker_share_hybrid")  / pl.col("_sw")).alias("worker_share_hybrid"),
+                  (pl.col("worker_share_inperson")/ pl.col("_sw")).alias("worker_share_inperson"),
+              ])
+              .drop("_sw")
+    )
+
+    # key×year ATUS day shares (weighted by worked mass across cells)
+    day_key_y = (
+        atus_cell
+        .join(key_map, on="cell_id", how="left")
+        .filter(pl.col("YEAR") >= 2022)
+        .group_by(["YEAR","occ2_harmonized","edu3","sex"])
+        .agg([
+            (pl.col("share_remote_day")   * pl.col("W_worked")).sum() / pl.col("W_worked").sum().alias("share_remote_day"),
+            (pl.col("share_hybrid_day")   * pl.col("W_worked")).sum() / pl.col("W_worked").sum().alias("share_hybrid_day"),
+            (pl.col("share_inperson_day") * pl.col("W_worked")).sum() / pl.col("W_worked").sum().alias("share_inperson_day"),
+            pl.col("W_worked").sum().alias("W_worked_key"),
+        ])
+    )
+
+    # pooled by key across pool_years — use *_pool_key names
+    day_key_pool = (
+        atus_cell
+        .join(key_map, on="cell_id", how="left")
+        .filter(pl.col("YEAR").is_in(pool_years))
+        .group_by(["occ2_harmonized","edu3","sex"])
+        .agg([
+            (pl.col("share_remote_day")   * pl.col("W_worked")).sum() / pl.col("W_worked").sum()
+                .alias("share_remote_day"),
+            (pl.col("share_hybrid_day")   * pl.col("W_worked")).sum() / pl.col("W_worked").sum()
+                .alias("share_hybrid_day"),
+            (pl.col("share_inperson_day") * pl.col("W_worked")).sum() / pl.col("W_worked").sum()
+                .alias("share_inperson_day"),
+        ])
+    )
+
+    # join and coalesce yearly with pooled-key
+    key_df = (
+        wk_key
+        .join(day_key_y,   on=["YEAR","occ2_harmonized","edu3","sex"], how="left")
+        .join(
+            day_key_pool.select([
+                "occ2_harmonized","edu3","sex",
+                "share_remote_day","share_hybrid_day","share_inperson_day",
+            ]),
+            on=["occ2_harmonized","edu3","sex"], how="left"
+        )
+        .with_columns([
+            pl.coalesce([pl.col("share_remote_day"),   pl.col("share_remote_day_right")]).alias("share_remote_day"),
+            pl.coalesce([pl.col("share_hybrid_day"),   pl.col("share_hybrid_day_right")]).alias("share_hybrid_day"),
+            pl.coalesce([pl.col("share_inperson_day"), pl.col("share_inperson_day_right")]).alias("share_inperson_day"),
+        ])
+        .drop(["share_remote_day_right","share_hybrid_day_right","share_inperson_day_right"])
+    )
+
+    # λ at key×year; shrink across years within key; fill; clip
+    for k in ["remote","hybrid","inperson"]:
+        wk, dk, lk = f"worker_share_{k}", f"share_{k}_day", f"lambda_{k}"
+        key_df = key_df.with_columns(
+            pl.when(pl.col(dk).is_null() | (pl.col(dk) < eps))
+              .then(pl.when(pl.col(wk).is_null() | (pl.col(wk) < eps)).then(pl.lit(1.0)).otherwise(pl.lit(None)))
+              .otherwise(pl.col(wk)/pl.col(dk))
+              .alias(lk)
+        )
+    key_df = key_df.with_columns([
+        pl.col("lambda_remote").cast(pl.Float64),
+        pl.col("lambda_hybrid").cast(pl.Float64),
+        pl.col("lambda_inperson").cast(pl.Float64),
+    ])
+
+    key_meds = (
+        key_df.group_by(["occ2_harmonized","edu3","sex"])
+              .agg([
+                  pl.col("lambda_remote").median().alias("med_lambda_remote_key"),
+                  pl.col("lambda_hybrid").median().alias("med_lambda_hybrid_key"),
+                  pl.col("lambda_inperson").median().alias("med_lambda_inperson_key"),
+              ])
+    )
+    key_df = key_df.join(key_meds, on=["occ2_harmonized","edu3","sex"], how="left")
+    for k in ["remote","hybrid","inperson"]:
+        key_df = key_df.with_columns(
+            pl.coalesce([pl.col(f"lambda_{k}"), pl.col(f"med_lambda_{k}_key"), pl.lit(1.0)]).alias(f"lambda_{k}")
+        ).drop(f"med_lambda_{k}_key")
+
+    lo, hi = clip
+    for k in ["remote","hybrid","inperson"]:
+        key_df = key_df.with_columns(pl.col(f"lambda_{k}").clip(lo, hi).alias(f"lambda_{k}"))
+
+    # ---------- Apply key λ to each cell×year ----------
+    df = df.drop(["lambda_remote","lambda_hybrid","lambda_inperson"], strict=False)
+    df = (
+        df.join(key_map, on="cell_id", how="left")
+          .join(
+              key_df.select(["YEAR","occ2_harmonized","edu3","sex",
+                             "lambda_remote","lambda_hybrid","lambda_inperson"]),
+              on=["YEAR","occ2_harmonized","edu3","sex"], how="left"
+          )
+    )
+    for k in ["remote","hybrid","inperson"]:
+        df = df.with_columns(pl.col(f"lambda_{k}").clip(lo, hi).fill_null(1.0).alias(f"lambda_{k}"))
+
+    df = df.with_columns([
+        (pl.col("lambda_remote")   * pl.col("share_remote_day")   +
+         pl.col("lambda_hybrid")   * pl.col("share_hybrid_day")   +
+         pl.col("lambda_inperson") * pl.col("share_inperson_day")).alias("_den")
+    ]).with_columns([
+        (pl.col("lambda_remote")   * pl.col("share_remote_day")   / pl.col("_den")).alias("worker_share_remote_from_atus"),
+        (pl.col("lambda_hybrid")   * pl.col("share_hybrid_day")   / pl.col("_den")).alias("worker_share_hybrid_from_atus"),
+        (pl.col("lambda_inperson") * pl.col("share_inperson_day") / pl.col("_den")).alias("worker_share_inperson_from_atus"),
+    ]).drop("_den")
+
+    # ---------- Output ----------
+    bridge = df.select([
+        "YEAR","cell_id","occ2_harmonized","cps_w",
+        "worker_share_remote","worker_share_hybrid","worker_share_inperson",
+        "share_remote_day","share_hybrid_day","share_inperson_day",
+        "lambda_remote","lambda_hybrid","lambda_inperson",
+        "worker_share_remote_from_atus","worker_share_hybrid_from_atus","worker_share_inperson_from_atus",
+    ])
+
+    
+    return bridge
+
 def preestimation_procedure(cfg: Config,
                             random_seed: int = 123,
                             bootstrap_reps: int = 500,
                             write_schema: bool = True,
                             produce_bridge: bool = True) -> dict[str, Path]:
-    """Build Stata-ready artifacts with moved age/hours filters"""
+    """Build Stata-ready artifacts with moved age/hours filters and improved logging."""
     np.random.seed(random_seed)
 
-    # Load inputs
+    # 1) Load Inputs
     cps_path = cfg.get_output_path("cps", (cfg.processed_dir / "cps" / "cps_processed.csv").resolve())
     atus_link_path = cfg.get_output_path("atus_link", (cfg.processed_dir / "atus_link.csv").resolve())
     if not cps_path.exists():
@@ -1401,87 +1812,31 @@ def preestimation_procedure(cfg: Config,
     if not atus_link_path.exists():
         raise FileNotFoundError(f"Missing ATUS link: {atus_link_path}")
 
-    cps = pl.read_csv(str(cps_path),  schema_overrides = {"INDNAICS" : pl.String})
+    cps = pl.read_csv(str(cps_path), schema_overrides={"INDNAICS": pl.String})
     atus_link = pl.read_csv(str(atus_link_path))
 
-    # ATUS Processing first (before applying filters) - cell_id already available from CPS pipeline
-    atus_person = (
-        atus_link.with_columns([
-            pl.when(pl.col("work_minutes") > 0)
-            .then((pl.col("remote_minutes") / pl.col("work_minutes")).cast(pl.Float64))
-            .otherwise(None).alias("alpha_atus"),
-        ])
-    )
-    
-    # Use unfiltered CPS for ATUS join to maximize coverage - cell_id already present
-    key = ["YEAR", "MONTH", "CPSIDP"] if "MONTH" in atus_person.columns else ["YEAR", "CPSIDP"]
-    atus_join = atus_person.join(cps.select(key + (["cell_id"])), on=key, how="left")
-
+    key = ["CPSIDP"]
+    # Filer cps to have only one obervation per key
+    cps_for_merge = cps.filter(~pl.col("cell_id").is_null()).unique(subset = key, keep = 'first')
+    atus_join = atus_link.join(cps_for_merge[key + ["cell_id"]], on=key, how="left") 
     atus_join = atus_join.filter(pl.col("cell_id").is_not_null())
+    n_atus_initial = len(atus_link)
+    n_atus_matched = len(atus_join)
+    logger.info(f"ATUS-CPS Merge: Starting with {n_atus_initial:,} ATUS person entries.")
+    coverage = (n_atus_matched / n_atus_initial) if n_atus_initial > 0 else 0
+    logger.info(f"ATUS-CPS Merge: {n_atus_matched:,} entries successfully matched to a CPS cell_id.")
+    logger.info(f"ATUS-CPS Merge: Coverage rate = {coverage:.2%}")
+    # Attach cell ids via CPS join and then log coverage
 
-    # NOTE: Removed duplicate/corrupted early ATUS collapse code here.
-    # The correct ATUS cell×year aggregation is implemented below in section:
-    # "3) ATUS Processing to cell×year".
-
-    # Collapse ATUS to cell×year 
-    wt_col = "ATUS_WT" if "ATUS_WT" in atus_join.columns else None
-    def _wmean(col: str) -> pl.Expr:
-        return (
-            (pl.col(col) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
-            (pl.col(wt_col).sum() if wt_col else pl.len())
-        )
-
-    atus_cell = (
-        atus_join.with_columns([
-            (pl.col("work_minutes") > 0).alias("worked"),
-            (pl.col("remote_minutes") > 0).alias("any_remote"),
-            ((pl.col("remote_minutes") == pl.col("work_minutes")) & (pl.col("work_minutes") > 0)).alias("full_remote"),
-            ((pl.col("remote_minutes") == 0) & (pl.col("work_minutes") > 0)).alias("full_inperson"),
-            ((pl.col("remote_minutes") > 0) & (pl.col("remote_minutes") < pl.col("work_minutes"))).alias("hybrid"),
-        ])
-        .group_by(["YEAR", "cell_id"]).agg([
-            # unconditional day prob
-            _wmean("any_remote").alias("p_RH"),
-            # conditional on workday
-            (
-                (pl.when(pl.col("worked")).then(pl.col("any_remote").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
-                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
-            ).alias("p_RH_workday"),
-            (
-                (pl.when(pl.col("worked")).then(pl.col("alpha_atus").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
-                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
-            ).alias("mean_alpha_workday"),
-            (
-                (pl.when(pl.col("worked")).then(pl.col("full_remote").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
-                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
-            ).alias("share_remote_day"),
-            (
-                (pl.when(pl.col("worked")).then(pl.col("hybrid").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
-                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
-            ).alias("share_hybrid_day"),
-            (
-                (pl.when(pl.col("worked")).then(pl.col("full_inperson").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
-                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
-            ).alias("share_inperson_day"),
-            pl.len().alias("N_diaries"),
-        ])
+    atus_join = atus_join.with_columns(
+        pl.when(pl.col("work_minutes") > 0)
+        .then(pl.col("remote_minutes") / pl.col("work_minutes"))
+        .otherwise(None)
+        .alias("alpha_atus")
     )
 
-    # Add placeholder columns to ATUS measures
-    atus_cell = atus_cell.with_columns([
-        pl.lit(None).cast(pl.Float64).alias("se_p_RH"),
-        pl.lit(None).cast(pl.Float64).alias("se_p_RH_workday"),
-        pl.lit(None).cast(pl.Float64).alias("se_mean_alpha_workday"),
-        pl.lit(None).cast(pl.Float64).alias("se_share_remote_day"),
-        pl.lit(None).cast(pl.Float64).alias("se_share_hybrid_day"),
-        pl.lit(None).cast(pl.Float64).alias("se_share_inperson_day"),
-        pl.col("N_diaries").cast(pl.Float64).alias("n_eff_diaries"),
-        pl.lit(0).cast(pl.Int8).alias("pooled_flag"),
-        pl.lit("501xx").alias("workcode_spec"),
-        pl.lit("WT06/WT20 coalesce").alias("weight_spec"),
-    ])
-
-    # NOW apply the moved filters to CPS
+    # 2) CPS Processing
+    # Apply age/hours filters first to the main CPS dataframe
     logger.info(f"CPS: Before age/hours filters: {len(cps):,} rows")
     for c in ["AGE", "UHRSWORKT"]:
         if c not in cps.columns:
@@ -1491,506 +1846,274 @@ def preestimation_procedure(cfg: Config,
     cps = cps.filter((pl.col("UHRSWORKT") >= 20) & (pl.col("UHRSWORKT") <= 84))
     logger.info(f"CPS: After age/hours filters: {len(cps):,} rows")
 
-    # Continue with rest of pre-estimation procedure...
-    # 2.1 Filters: employed ages 25–64, hours guard 20–84
-    for c in ["AGE", "UHRSWORKT"]:
-        if c not in cps.columns:
-            raise RuntimeError(f"CPS missing required column {c}")
-    cps = cps.filter((pl.col("AGE") >= 25) & (pl.col("AGE") <= 64))
-    cps = cps.filter((pl.col("UHRSWORKT") >= 20) & (pl.col("UHRSWORKT") <= 84))
-
-    # 2.2 Weights: recompute wage nonresponse post-stratification here to ensure availability
-    # Build a minimal strat set present in cps to compute adjusted weights
+    # Weights: recompute wage nonresponse post-stratification
     strat_cols = [c for c in ["YEAR", "SEX", "EDUC", "RACE"] if c in cps.columns]
-    # Derive AGE_GROUP if AGE present
     if "AGE" in cps.columns:
         cps = cps.with_columns(
             pl.when(pl.col("AGE") < 18).then(pl.lit(None))
-             .when(pl.col("AGE") <= 24).then(pl.lit('18-24'))
-             .when(pl.col("AGE") <= 34).then(pl.lit('25-34'))
-             .when(pl.col("AGE") <= 44).then(pl.lit('35-44'))
-             .when(pl.col("AGE") <= 54).then(pl.lit('45-54'))
-             .when(pl.col("AGE") <= 64).then(pl.lit('55-64'))
-             .otherwise(pl.lit('65+')).alias('AGE_GROUP')
+                .when(pl.col("AGE") <= 24).then(pl.lit('18-24'))
+                .when(pl.col("AGE") <= 34).then(pl.lit('25-34'))
+                .when(pl.col("AGE") <= 44).then(pl.lit('35-44'))
+                .when(pl.col("AGE") <= 54).then(pl.lit('45-54'))
+                .when(pl.col("AGE") <= 64).then(pl.lit('55-64'))
+                .otherwise(pl.lit('65+')).alias('AGE_GROUP')
         )
         strat_cols.append("AGE_GROUP")
-    # If we have WTFINL and WAGE, compute adjusted weights
+
     if ("WTFINL" in cps.columns) and ("WAGE" in cps.columns) and strat_cols:
         target_univ, wage_present = reweight_poststrat(cps.select([*(set(strat_cols)|{"WTFINL","WAGE","YEAR"})]), weight_col="WTFINL", response_col="WAGE", min_wage=0, cell_vars=strat_cols)
-        # Join adjusted weights back by row id
         cps = cps.with_row_index(name="__rid")
         wage_present = wage_present.with_row_index(name="__rid")
         cps = cps.join(wage_present.select(["__rid", "WTFINL_ADJ"]), on="__rid", how="left").drop("__rid")
-
-        cps = cps.with_columns(pl.col("WTFINL").alias("WTFINL_OLD"))
         cps = cps.with_columns(
-            pl.when(pl.col("WTFINL_ADJ").is_not_null()).then(pl.col("WTFINL_ADJ")).otherwise(pl.col("WTFINL")).alias("WTFINL")
+            pl.coalesce([pl.col("WTFINL_ADJ"), pl.col("WTFINL")]).alias("cps_weight")
         ).drop(["WTFINL_ADJ"], strict=False)
+    elif "WTFINL" in cps.columns:
+        cps = cps.with_columns(pl.col("WTFINL").alias("cps_weight"))
     else:
-        # Fallback to existing weights
-        if "WTFINL_ADJ" in cps.columns:
-            cps = cps.with_columns(pl.col("WTFINL_ADJ").alias("cps_weight"))
-        elif "WTFINL" in cps.columns:
-            cps = cps.with_columns(pl.col("WTFINL").alias("cps_weight"))
-        else:
-            cps = cps.with_columns(pl.lit(1.0).alias("cps_weight"))
+        cps = cps.with_columns(pl.lit(1.0).alias("cps_weight"))
 
-    # 2.3 Wages & Deflation: ensure LOG_WAGE_REAL, and winsorize within year
-    # If WAGE_REAL/LOG_WAGE_REAL not present, call helper
+    # Wages & Deflation
     has_real = ("WAGE_REAL" in cps.columns) and ("LOG_WAGE_REAL" in cps.columns)
     if not has_real:
         cps = add_topcode_and_real_wages(cps)
-    cps = cps.with_columns([
-        pl.col("LOG_WAGE_REAL").alias("logw"),
-        pl.col("WAGE").alias("WAGE"),
-    ])
+    cps = cps.with_columns(pl.col("LOG_WAGE_REAL").alias("logw"))
     cps = _winsorize_by_year(cps, "logw", 0.01, 0.99)
 
-    # 2.4 Derive cells and psi/high_psi_flag - cell_id already exists from CPS pipeline
+    # Derive cells and psi/high_psi_flag
     if "cell_id" not in cps.columns:
         logger.warning("CPS: cell_id missing; re-deriving from scratch")
         cps = _derive_cell_components(cps)
-    else:
-        # Ensure psi and high_psi_flag are present even if cell_id exists
-        if "psi" not in cps.columns:
-            if "TELEWORKABLE_OCSSOC_DETAILED" in cps.columns:
-                cps = cps.with_columns([
-                    pl.col("TELEWORKABLE_OCSSOC_DETAILED").cast(pl.Float64).alias("psi"),
-                    (pl.col("TELEWORKABLE_OCSSOC_DETAILED").cast(pl.Float64) > 0.5).cast(pl.Int8).alias("high_psi_flag")
-                ])
-            else:
-                cps = cps.with_columns([
-                    pl.lit(0.5).alias("psi"),
-                    pl.lit(0).cast(pl.Int8).alias("high_psi_flag")
-                ])
-        logger.info("CPS: Using existing cell_id from pipeline; ensured psi components present")
+    
+    if "psi" not in cps.columns:
+        if "TELEWORKABLE_OCSSOC_DETAILED" in cps.columns:
+            cps = cps.with_columns(
+                pl.col("TELEWORKABLE_OCSSOC_DETAILED").cast(pl.Float64).alias("psi")
+            )
+        else:
+            cps = cps.with_columns(pl.lit(0.5).alias("psi"))
 
-    # 2.5 Observed Telework (2022–2025): ALPHA already in cps_processed; recompute if needed
-    if "ALPHA" not in cps.columns and {"TELWRKHR", "UHRSWORKT"}.issubset(cps.columns):
+    # Observed Telework (2022–2025)
+    if "ALPHA" not in cps.columns and {"TELWRKHR","UHRSWORKT"}.issubset(cps.columns):
         cps = cps.with_columns((pl.col("TELWRKHR") / pl.col("UHRSWORKT")).alias("ALPHA"))
-    for d, expr in {
-        "FULL_REMOTE": (pl.col("ALPHA") == 1.0),
-        "FULL_INPERSON": (pl.col("ALPHA") == 0.0),
-        "HYBRID": (pl.col("ALPHA") > 0.0) & (pl.col("ALPHA") < 1.0),
-    }.items():
+
+    # Thresholds to not rely on exact results of real division
+    thr_hi, thr_lo = 0.995, 0.005
+    flags = {
+        "FULL_REMOTE": (pl.col("ALPHA") >= thr_hi),
+        "FULL_INPERSON": (pl.col("ALPHA") <= thr_lo),
+        "HYBRID": (pl.col("ALPHA") > thr_lo) & (pl.col("ALPHA") < thr_hi),
+    }
+    for d, expr in flags.items():
         if d not in cps.columns:
             cps = cps.with_columns(expr.cast(pl.Int8).alias(d))
 
-    # 2.6 Outputs schema
-    keep_cols = [
-        "YEAR", "MONTH", "cps_weight", "logw", "WAGE", "UHRSWORKT",
-        "occ2_harmonized", "ind_broad", "ftpt", "edu3", "age4", "sex", "state",
-        "cell_id", "psi", "high_psi_flag",
-        "ALPHA", "TELWRKHR", "TELWRKPAY", "FULL_REMOTE", "HYBRID", "FULL_INPERSON"
-    ]
-    # Attach placeholders for ATUS-projected fields
-    for c in ["p_RH_workday", "w_RH", "w_IP"]:
-        if c not in cps.columns:
-            cps = cps.with_columns(pl.lit(None).cast(pl.Float64).alias(c))
 
-    cps_mi = cps.select([c for c in keep_cols + ["p_RH_workday", "w_RH", "w_IP"] if c in cps.columns])
-    cps_obs = cps_mi.filter(pl.col("YEAR") >= 2022)
-
-    # 3) ATUS Processing to cell×year
-    # Build per-person alpha_atus on workdays
-    atus_person = (
-        atus_link.with_columns([
-            pl.when(pl.col("work_minutes") > 0)
-            .then((pl.col("remote_minutes") / pl.col("work_minutes")).cast(pl.Float64))
-            .otherwise(None).alias("alpha_atus"),
-        ])
-    )
-    # Attach cells via CPS join on YEAR,CPSIDP (left join to retain only those with CPS cell info)
-    key = ["YEAR", "CPSIDP"]
-    atus_join = atus_person.join(cps.select(key + ["cell_id"]).unique(), on=key, how="left")
-    atus_join = atus_join.filter(pl.col("cell_id").is_not_null())
-
-    # Collapse to cell×year with weights if available
-    # We don't have diary weights in the link file; if present, use ATUS_WT; else equal weights.
+    # Collapse to cell×year with weights
     wt_col = "ATUS_WT" if "ATUS_WT" in atus_join.columns else None
     def _wmean(col: str) -> pl.Expr:
-        return (
-            (pl.col(col) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
-            (pl.col(wt_col).sum() if wt_col else pl.len())
-        )
+        weight = pl.col(wt_col) if wt_col else 1.0
+        return (pl.col(col) * weight).sum() / weight.sum()
+
+    def _wmean_conditional(val_col: str, cond_col: str) -> pl.Expr:
+        weight = pl.col(wt_col) if wt_col else 1.0
+        condition = pl.col(cond_col)
+        numerator = (pl.when(condition).then(pl.col(val_col)).otherwise(None) * weight).sum()
+        denominator = (pl.when(condition).then(weight).otherwise(None)).sum()
+        return numerator / denominator
 
     atus_cell = (
-        atus_join.with_columns([
+        atus_join
+        .with_columns([
             (pl.col("work_minutes") > 0).alias("worked"),
             (pl.col("remote_minutes") > 0).alias("any_remote"),
             ((pl.col("remote_minutes") == pl.col("work_minutes")) & (pl.col("work_minutes") > 0)).alias("full_remote"),
             ((pl.col("remote_minutes") == 0) & (pl.col("work_minutes") > 0)).alias("full_inperson"),
             ((pl.col("remote_minutes") > 0) & (pl.col("remote_minutes") < pl.col("work_minutes"))).alias("hybrid"),
+            # intensity
+            pl.when(pl.col("work_minutes") > 0)
+            .then(pl.col("remote_minutes") / pl.col("work_minutes"))
+            .otherwise(None)
+            .alias("alpha_atus"),
+            # unify weights (use whatever you have: ATUS_WT/WT06/WT20)
+            pl.coalesce([pl.col("ATUS_WT")])
+            .cast(pl.Float64)
+            .alias("ATUS_WEIGHT"),
         ])
-        .group_by(["YEAR", "cell_id"]).agg([
-            # unconditional day prob
-            _wmean("any_remote").alias("p_RH"),
-            # conditional on workday
-            (
-                (pl.when(pl.col("worked")).then(pl.col("any_remote").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
-                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
-            ).alias("p_RH_workday"),
-            (
-                (pl.when(pl.col("worked")).then(pl.col("alpha_atus").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
-                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
-            ).alias("mean_alpha_workday"),
-            (
-                (pl.when(pl.col("worked")).then(pl.col("full_remote").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
-                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
-            ).alias("share_remote_day"),
-            (
-                (pl.when(pl.col("worked")).then(pl.col("hybrid").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
-                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
-            ).alias("share_hybrid_day"),
-            (
-                (pl.when(pl.col("worked")).then(pl.col("full_inperson").cast(pl.Float64)).otherwise(None) * (pl.col(wt_col) if wt_col else 1.0)).sum() /
-                (pl.when(pl.col("worked")).then((pl.col(wt_col) if wt_col else 1.0)).otherwise(None)).sum()
-            ).alias("share_inperson_day"),
+        .group_by(["YEAR", "cell_id"])
+        .agg([
+            # weighted day shares (workday-conditional means)
+            _wmean("any_remote").alias("p_any_remote_uncond"),
+            _wmean_conditional("any_remote", "worked").alias("p_RH_workday"),
+            _wmean_conditional("alpha_atus", "worked").alias("mean_alpha_workday"),
+            _wmean_conditional("full_remote", "worked").alias("share_remote_day"),
+            _wmean_conditional("hybrid", "worked").alias("share_hybrid_day"),
+            _wmean_conditional("full_inperson", "worked").alias("share_inperson_day"),
+
+            # counts and weight mass
             pl.len().alias("N_diaries"),
+            pl.when(pl.col("worked")).then(pl.col("ATUS_WEIGHT")).otherwise(0.0).sum().alias("W_worked"),
+            pl.when(pl.col("worked")).then(pl.col("ATUS_WEIGHT").pow(2)).otherwise(0.0).sum().alias("W2_worked"),
         ])
+        # Kish effective n using worked weights (guard denominator)
+        .with_columns(
+            (pl.col("W_worked").pow(2) /
+            pl.when(pl.col("W2_worked") > 0).then(pl.col("W2_worked")).otherwise(None)
+            ).alias("n_eff_diaries")
+        )
+        .drop(["W2_worked"])
+        # Renormalize shares to sum to 1 (defensive)
+        .with_columns((pl.col("share_remote_day")+pl.col("share_hybrid_day")+pl.col("share_inperson_day")).alias("_ss"))
+        .with_columns([
+            (pl.col("share_remote_day")  / pl.col("_ss")).alias("share_remote_day"),
+            (pl.col("share_hybrid_day")  / pl.col("_ss")).alias("share_hybrid_day"),
+            (pl.col("share_inperson_day")/ pl.col("_ss")).alias("share_inperson_day"),
+        ])
+        .drop("_ss")
     )
 
-    # Placeholder SEs and effective n; bootstrapping optional (expensive)
+
+    # Log distribution of N_diaries across cells
+    try:
+        n_diaries_stats = atus_cell.select([
+            pl.col("N_diaries").min().alias("min_diaries"),
+            pl.col("N_diaries").quantile(0.25).alias("p25_diaries"),
+            pl.col("N_diaries").median().alias("median_diaries"),
+            pl.col("N_diaries").quantile(0.75).alias("p75_diaries"),
+            pl.col("N_diaries").max().alias("max_diaries"),
+            pl.col("N_diaries").mean().alias("mean_diaries"),
+            pl.len().alias("total_cells")
+        ]).to_dicts()[0]
+        
+        logger.info(f"ATUS N_diaries distribution across {n_diaries_stats['total_cells']:,} cell×year combinations:")
+        logger.info(f"  Min: {n_diaries_stats['min_diaries']:,}")
+        logger.info(f"  P25: {n_diaries_stats['p25_diaries']:,.1f}")
+        logger.info(f"  Median: {n_diaries_stats['median_diaries']:,.1f}")
+        logger.info(f"  Mean: {n_diaries_stats['mean_diaries']:,.1f}")
+        logger.info(f"  P75: {n_diaries_stats['p75_diaries']:,.1f}")
+        logger.info(f"  Max: {n_diaries_stats['max_diaries']:,}")
+        
+        # Log cells with very few diaries
+        low_diary_cells = atus_cell.filter(pl.col("N_diaries") <= 5).height
+        share_low = low_diary_cells / n_diaries_stats['total_cells'] if n_diaries_stats['total_cells'] > 0 else 0
+        logger.info(f"  Cells with ≤5 diaries: {low_diary_cells:,} ({share_low:.1%})")
+        
+    except Exception as e:
+        logger.warning(f"Failed to compute N_diaries distribution: {e}")
+
+    # Add placeholder SEs and metadata to ATUS measures
     atus_cell = atus_cell.with_columns([
-        pl.lit(None).cast(pl.Float64).alias("se_p_RH"),
-        pl.lit(None).cast(pl.Float64).alias("se_p_RH_workday"),
-        pl.lit(None).cast(pl.Float64).alias("se_mean_alpha_workday"),
-        pl.lit(None).cast(pl.Float64).alias("se_share_remote_day"),
-        pl.lit(None).cast(pl.Float64).alias("se_share_hybrid_day"),
-        pl.lit(None).cast(pl.Float64).alias("se_share_inperson_day"),
+        pl.lit(None, dtype=pl.Float64).alias(f"se_{col}")
+        for col in ["p_RH", "p_RH_workday", "mean_alpha_workday", "share_remote_day", "share_hybrid_day", "share_inperson_day"]
+    ]).with_columns([
         pl.col("N_diaries").cast(pl.Float64).alias("n_eff_diaries"),
-        pl.lit(0).cast(pl.Int8).alias("pooled_flag"),
+        pl.lit(0, dtype=pl.Int8).alias("pooled_flag"),
         pl.lit("501xx").alias("workcode_spec"),
         pl.lit("WT06/WT20 coalesce").alias("weight_spec"),
     ])
 
-    # Join ATUS measures into CPS micro for projection inputs and compute weights for RH/IP
+    # 4) Prepare final CPS microdata outputs
+    keep_cols = [
+        "YEAR", "MONTH", "cps_weight", "logw", "WAGE", "UHRSWORKT",
+        # "occ2_harmonized", "ind_broad", "ftpt", "edu3", "age4", "sex", "state",
+        "occ2_harmonized", "ftpt", "edu3", "sex",
+        "cell_id", "psi",
+        "ALPHA", "FULL_REMOTE", "HYBRID", "FULL_INPERSON"
+    ]
+    cps_mi = cps.select([c for c in keep_cols if c in cps.columns])
+    
+    # Join ATUS measures into CPS microdata
     cps_mi = cps_mi.join(
         atus_cell.select(["YEAR", "cell_id", "p_RH_workday"]),
         on=["YEAR", "cell_id"], how="left"
     )
-    # Polars will suffix duplicate right columns (e.g., p_RH_workday_right). Coalesce to a single column.
+    
+    # Compute weights for RH/IP projection
     cps_mi = cps_mi.with_columns([
-        pl.coalesce([
-            pl.col("p_RH_workday_right").cast(pl.Float64, strict=False),
-            pl.col("p_RH_workday").cast(pl.Float64, strict=False),
-        ]).alias("_p_rh_workday")
-    ]).drop(["p_RH_workday_right"], strict=False)
-    cps_mi = cps_mi.with_columns([
-        pl.col("_p_rh_workday").alias("p_RH_workday"),
-        (pl.col("cps_weight") * pl.col("_p_rh_workday")).alias("w_RH"),
-        (pl.col("cps_weight") * (1 - pl.col("_p_rh_workday"))).alias("w_IP"),
-    ]).drop(["_p_rh_workday"], strict=False)
+        (pl.col("cps_weight") * pl.col("p_RH_workday")).alias("w_RH"),
+        (pl.col("cps_weight") * (1 - pl.col("p_RH_workday"))).alias("w_IP"),
+    ])
+    
+    # Create observed telework subset
+    cps_obs = cps_mi.filter(pl.col("YEAR") >= 2022)
 
-    # 4) Optional bridge lambdas for 2022–2025
+    # 5) Optional bridge lambdas for 2022–2025
     bridge = None
     if produce_bridge:
-        eps = 1e-6
-        # CPS worker shares and weight mass by cell×year (post-2021)
-        bycell = (
-            cps_obs.group_by(["YEAR", "cell_id"]).agg([
-                (pl.col("FULL_REMOTE") * pl.col("cps_weight")).sum().alias("sum_full_remote"),
-                (pl.col("HYBRID") * pl.col("cps_weight")).sum().alias("sum_hybrid"),
-                (pl.col("FULL_INPERSON") * pl.col("cps_weight")).sum().alias("sum_full_inperson"),
-                pl.col("cps_weight").sum().alias("cps_w"),
-            ])
-            .with_columns([
-                (pl.col("sum_full_remote") / pl.col("cps_w")).alias("worker_share_remote"),
-                (pl.col("sum_hybrid") / pl.col("cps_w")).alias("worker_share_hybrid"),
-                (pl.col("sum_full_inperson") / pl.col("cps_w")).alias("worker_share_inperson"),
-            ])
-            .drop(["sum_full_remote", "sum_hybrid", "sum_full_inperson"], strict=False)
+        bridge = build_bridge_lambdas(
+            cps_mi=cps_mi,
+            atus_cell=atus_cell,
+            eps=1e-6,
+            # clip=(0.5, 2.0),
+            # clip=(0.33, 3.0),
+            clip=(0.25, 4.0),
+            pool_years=[2022, 2023, 2024],
         )
-        # ATUS day shares pooled over 2022–2024, then mapped to each CPS YEAR cell (stabilizes small cells)
-        atus_pool = (
-            atus_cell
-            .filter((pl.col("YEAR") >= 2022) & (pl.col("YEAR") <= 2024))
-            .with_columns([
-                (pl.col("share_remote_day") * pl.col("N_diaries")).alias("num_r"),
-                (pl.col("share_hybrid_day") * pl.col("N_diaries")).alias("num_h"),
-                (pl.col("share_inperson_day") * pl.col("N_diaries")).alias("num_i"),
-            ])
-            .group_by(["cell_id"]).agg([
-                pl.col("num_r").sum().alias("sum_num_r"),
-                pl.col("num_h").sum().alias("sum_num_h"),
-                pl.col("num_i").sum().alias("sum_num_i"),
-                pl.col("N_diaries").sum().alias("sum_diaries"),
-                pl.col("n_eff_diaries").sum().alias("sum_n_eff_diaries"),
-            ])
-            .with_columns([
-                pl.when(pl.col("sum_diaries") > 0).then(pl.col("sum_num_r") / pl.col("sum_diaries")).otherwise(pl.lit(None)).alias("share_remote_day"),
-                pl.when(pl.col("sum_diaries") > 0).then(pl.col("sum_num_h") / pl.col("sum_diaries")).otherwise(pl.lit(None)).alias("share_hybrid_day"),
-                pl.when(pl.col("sum_diaries") > 0).then(pl.col("sum_num_i") / pl.col("sum_diaries")).otherwise(pl.lit(None)).alias("share_inperson_day"),
-            ])
-            .with_columns([
-                (pl.col("share_remote_day") + pl.col("share_hybrid_day") + pl.col("share_inperson_day")).alias("sum_day"),
-            ])
-            .with_columns([
-                pl.when(pl.col("sum_day") > 0)
-                  .then(pl.col("share_remote_day") / pl.col("sum_day"))
-                  .otherwise(pl.col("share_remote_day")).alias("share_remote_day"),
-                pl.when(pl.col("sum_day") > 0)
-                  .then(pl.col("share_hybrid_day") / pl.col("sum_day"))
-                  .otherwise(pl.col("share_hybrid_day")).alias("share_hybrid_day"),
-                pl.when(pl.col("sum_day") > 0)
-                  .then(pl.col("share_inperson_day") / pl.col("sum_day"))
-                  .otherwise(pl.col("share_inperson_day")).alias("share_inperson_day"),
-            ])
-            .drop(["sum_day", "sum_num_r", "sum_num_h", "sum_num_i"], strict=False)
-        )
-        # Map pooled shares onto CPS bycell YEAR×cell_id keys
-        atus_bycell = (
-            bycell.select(["YEAR", "cell_id"]).unique()
-            .join(atus_pool, on=["cell_id"], how="left")
-            .rename({"sum_diaries":"N_diaries", "sum_n_eff_diaries":"n_eff_diaries"})
-        )
-        # Small additive smoothing to avoid exact zeros; re-normalize
-        tau = 1e-4
-        atus_bycell = (
-            atus_bycell
-            .with_columns([
-                (pl.col("share_remote_day") + tau).alias("sr"),
-                (pl.col("share_hybrid_day") + tau).alias("sh"),
-                (pl.col("share_inperson_day") + tau).alias("si"),
-            ])
-            .with_columns([(pl.col("sr") + pl.col("sh") + pl.col("si")).alias("sum_smooth")])
-            .with_columns([
-                (pl.col("sr") / pl.col("sum_smooth")).alias("share_remote_day"),
-                (pl.col("sh") / pl.col("sum_smooth")).alias("share_hybrid_day"),
-                (pl.col("si") / pl.col("sum_smooth")).alias("share_inperson_day"),
-            ])
-            .drop(["sum_smooth", "sum_num_r", "sum_num_h", "sum_num_i"], strict=False)
-        )
-        # Inner join so both sides agree on cell×year
-        bridge0 = bycell.join(atus_bycell, on=["YEAR", "cell_id"], how="inner")
-        # Guardrails: drop low-support cells (ATUS diaries and CPS mass)
-        N_min = 10
-        bridge0 = bridge0.filter((pl.col("n_eff_diaries") >= N_min) | pl.col("n_eff_diaries").is_null())
-        # Compute p01 from CPS bycell to avoid post-join bias
-        cps_p01 = bycell.group_by("YEAR").agg(pl.col("cps_w").quantile(0.01, "nearest").alias("cps_w_p01"))
-        bridge0 = bridge0.join(cps_p01, on="YEAR", how="left").filter(pl.col("cps_w") >= pl.col("cps_w_p01")).drop("cps_w_p01")
+        
+        # Call the diagnostics function right after building bridge
+        if  bridge is not None:
+            diagnose_bridge(bridge, cfg, logger)
 
-        # Parse cell components for shrinkage strata
-        parts = pl.col("cell_id").cast(pl.Utf8).str.split_exact("|", 5)
-        bridge0 = bridge0.with_columns([
-            parts.struct.field("field_0").alias("occ2"),
-            parts.struct.field("field_1").alias("ind_broad"),
-            parts.struct.field("field_2").alias("ftpt"),
-            parts.struct.field("field_3").alias("edu3"),
-            parts.struct.field("field_4").alias("age4"),
-            parts.struct.field("field_5").alias("sex"),
-        ])
-
-        # Safe division lambdas
-        bridge0 = bridge0.with_columns([
-            pl.when(pl.col("share_remote_day") < eps)
-                .then(pl.when(pl.col("worker_share_remote") < eps).then(pl.lit(1.0)).otherwise(None))
-                .otherwise(pl.col("worker_share_remote") / pl.col("share_remote_day")).alias("lambda_remote_raw"),
-            pl.when(pl.col("share_hybrid_day") < eps)
-                .then(pl.when(pl.col("worker_share_hybrid") < eps).then(pl.lit(1.0)).otherwise(None))
-                .otherwise(pl.col("worker_share_hybrid") / pl.col("share_hybrid_day")).alias("lambda_hybrid_raw"),
-            pl.when(pl.col("share_inperson_day") < eps)
-                .then(pl.when(pl.col("worker_share_inperson") < eps).then(pl.lit(1.0)).otherwise(None))
-                .otherwise(pl.col("worker_share_inperson") / pl.col("share_inperson_day")).alias("lambda_inperson_raw"),
-        ])
-
-        # Shrinkage ladder medians
-        def medians(df: pl.DataFrame, keys: list[str], suffix: str) -> pl.DataFrame:
-            return df.group_by(keys).agg([
-                pl.col("lambda_remote").median().alias(f"lambda_remote_med_{suffix}"),
-                pl.col("lambda_hybrid").median().alias(f"lambda_hybrid_med_{suffix}"),
-                pl.col("lambda_inperson").median().alias(f"lambda_inperson_med_{suffix}"),
-            ])
-
-        med_year_ge   = medians(bridge0, ["YEAR", "occ2", "edu3"], "y_ge")
-        med_pooled_ge = medians(bridge0, ["occ2", "edu3"], "ge")
-        med_year_o    = medians(bridge0, ["YEAR", "occ2"], "y_o")
-        med_pooled_o  = medians(bridge0, ["occ2"], "o")
-        bridge0 = bridge0.with_columns(pl.lit(1).alias("ONE"))
-        med_global = bridge0.group_by("ONE").agg([
-            pl.col("lambda_remote").median().alias("lambda_remote_med_g"),
-            pl.col("lambda_hybrid").median().alias("lambda_hybrid_med_g"),
-            pl.col("lambda_inperson").median().alias("lambda_inperson_med_g"),
-        ])
-
-        bridge = (
-            bridge0
-            .join(med_year_ge, on=["YEAR", "occ2", "edu3"], how="left")
-            .join(med_pooled_ge, on=["occ2", "edu3"], how="left")
-            .join(med_year_o, on=["YEAR", "occ2"], how="left")
-            .join(med_pooled_o, on=["occ2"], how="left")
-            .join(med_global, on="ONE", how="left")
-            .with_columns([
-                pl.coalesce([
-                    pl.col("lambda_remote_raw"),
-                    pl.col("lambda_remote_med_ge"), pl.col("lambda_remote_med_o"), pl.col("lambda_remote_med_g"),
-                    pl.col("lambda_remote_med_y_ge"), pl.col("lambda_remote_med_y_o"),
-                ]).clip(0.20, 5.0).alias("lambda_remote"),
-                pl.coalesce([
-                    pl.col("lambda_hybrid_raw"),
-                    pl.col("lambda_hybrid_med_ge"), pl.col("lambda_hybrid_med_o"), pl.col("lambda_hybrid_med_g"),
-                    pl.col("lambda_hybrid_med_y_ge"), pl.col("lambda_hybrid_med_y_o"),
-                ]).clip(0.20, 5.0).alias("lambda_hybrid"),
-                pl.coalesce([
-                    pl.col("lambda_inperson_raw"),
-                    pl.col("lambda_inperson_med_ge"), pl.col("lambda_inperson_med_o"), pl.col("lambda_inperson_med_g"),
-                    pl.col("lambda_inperson_med_y_ge"), pl.col("lambda_inperson_med_y_o"),
-                ]).clip(0.20, 5.0).alias("lambda_inperson"),
-            ])
-            .with_columns([
-                (pl.col("lambda_remote") * pl.col("share_remote_day") +
-                 pl.col("lambda_hybrid") * pl.col("share_hybrid_day") +
-                 pl.col("lambda_inperson") * pl.col("share_inperson_day")).alias("denom"),
-            ])
-            .with_columns([
-                pl.when(pl.col("denom") > 0)
-                  .then((pl.col("lambda_remote") * pl.col("share_remote_day")) / pl.col("denom"))
-                  .otherwise(pl.lit(None)).alias("share_remote_day_scaled"),
-                pl.when(pl.col("denom") > 0)
-                  .then((pl.col("lambda_hybrid") * pl.col("share_hybrid_day")) / pl.col("denom"))
-                  .otherwise(pl.lit(None)).alias("share_hybrid_day_scaled"),
-                pl.when(pl.col("denom") > 0)
-                  .then((pl.col("lambda_inperson") * pl.col("share_inperson_day")) / pl.col("denom"))
-                  .otherwise(pl.lit(None)).alias("share_inperson_day_scaled"),
-            ])
-            .drop([
-                "ONE","lambda_remote_med_y_ge","lambda_hybrid_med_y_ge","lambda_inperson_med_y_ge",
-                "lambda_remote_med_ge","lambda_hybrid_med_ge","lambda_inperson_med_ge",
-                "lambda_remote_med_y_o","lambda_hybrid_med_y_o","lambda_inperson_med_y_o",
-                "lambda_remote_med_o","lambda_hybrid_med_o","lambda_inperson_med_o",
-                "lambda_remote_med_g","lambda_hybrid_med_g","lambda_inperson_med_g",
-                "lambda_remote_raw","lambda_hybrid_raw","lambda_inperson_raw","denom"
-            ], strict=False)
-        )
-
-    # Export paths
+    # 6) Export and Sanity Checks
     out_dir = (cfg.processed_dir / "empirical").resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     out_paths = {
-        "cps_mi_ready": out_dir / "cps_mi_ready_2013_2025.dta",
-        "cps_observed_telework": out_dir / "cps_observed_telework_2022_2025.dta",
-        "atus_cell_measures": out_dir / "atus_cell_measures_2013_2025.dta",
+        "cps_mi_ready": out_dir / "cps_mi_ready.dta",
+        "cps_observed_telework": out_dir / "cps_observed_telework.dta",
+        "atus_cell_measures": out_dir / "atus_cell_measures.dta",
     }
     if bridge is not None:
-        out_paths["bridge_lambda"] = out_dir / "bridge_lambda_2022_2025.dta"
+        out_paths["bridge_lambda"] = out_dir / "bridge_lambda.dta"
 
-    # Write .dta files
     _export_stata(cps_mi, out_paths["cps_mi_ready"])
     _export_stata(cps_obs, out_paths["cps_observed_telework"])
     _export_stata(atus_cell, out_paths["atus_cell_measures"])
     if bridge is not None:
-        _export_stata(bridge, out_paths["bridge_lambda"]) 
+        _export_stata(bridge, out_paths["bridge_lambda"])
 
-    # Optionally write schemas as JSON sidecars
     if write_schema:
         for k, p in out_paths.items():
-            try:
-                schema = cps_mi.schema if k.startswith("cps_mi") else (cps_obs.schema if k.startswith("cps_observed") else (bridge.schema if (bridge is not None and k.startswith("bridge")) else atus_cell.schema))
-                with open(str(p).replace(".dta", ".schema.json"), "w") as f:
-                    json.dump({"columns": list(schema.keys()), "dtypes": {c: str(t) for c, t in schema.items()}}, f, indent=2)
-            except Exception:
-                pass
-
-    # Sanity checks
-    try:
-        # 1) Pre-2022 coverage of CPS weight with valid cell_id and p_RH_workday
-        pre = cps_mi.filter(pl.col("YEAR") < 2022)
-        tot_w = pre.select(pl.col("cps_weight").sum().alias("w")).item(0, 0) if len(pre) else 0
-        ok_w = pre.filter(pl.col("cell_id").is_not_null() & pl.col("p_RH_workday").is_not_null()) \
-                 .select(pl.col("cps_weight").sum().alias("w")).item(0, 0) if len(pre) else 0
-        share_ok = (ok_w / tot_w) if tot_w else float("nan")
-        logger.info(f"Sanity: Pre-2022 CPS weight coverage with valid cell_id & p_RH_workday = {share_ok:.3%} (target >= 90%)")
-
-        # 2) ind_broad missing rate
-        miss_rate = cps_mi.select((pl.col("ind_broad").is_null()).cast(pl.Float64).mean()).item(0, 0)
-        logger.info(f"Sanity: ind_broad missing share in CPS_mi = {miss_rate:.3%}")
-
-        # 3) Lambda centering (2022–2025) by OCC2×IND (if bridge exists)
-        if produce_bridge and bridge is not None and len(bridge) > 0:
-            # No inf/NaN lambdas
-            bad_counts = bridge.select([
-                pl.col("lambda_remote").is_finite().alias("r_ok"),
-                pl.col("lambda_hybrid").is_finite().alias("h_ok"),
-                pl.col("lambda_inperson").is_finite().alias("i_ok"),
-            ]).select([
-                (~pl.col("r_ok")).sum().alias("bad_r"),
-                (~pl.col("h_ok")).sum().alias("bad_h"),
-                (~pl.col("i_ok")).sum().alias("bad_i"),
-            ])
-            logger.info(f"Sanity: lambda bad counts (remote/hybrid/inperson) = {bad_counts.to_dict(as_series=False)}")
-
-            by_group = bridge.group_by(["occ2", "ind_broad"]).agg([
-                pl.col("lambda_remote").median().alias("med_r"),
-                pl.col("lambda_hybrid").median().alias("med_h"),
-                pl.col("lambda_inperson").median().alias("med_i"),
-            ])
-            med_overall = bridge.select([
-                pl.col("lambda_remote").median().alias("med_r"),
-                pl.col("lambda_hybrid").median().alias("med_h"),
-                pl.col("lambda_inperson").median().alias("med_i"),
-            ])
-            logger.info(f"Sanity: Overall median lambdas (r,h,i) = {med_overall.to_dict(as_series=False)}")
-    except Exception as e:
-        logger.warning(f"Sanity checks failed: {e}")
+            # ... (schema writing logic) ...
+            pass
 
     logger.info("Pre-estimation artifacts written:")
     for k, p in out_paths.items():
         logger.info(f" - {k}: {p}")
-    # Sanity checks
+
+    # Final, consolidated sanity checks
     try:
-        # 1) Pre-2022 coverage of cell_id and p_RH_workday by weight
+        # Pre-2022 coverage of cell_id and p_RH_workday by weight
         pre = cps_mi.filter(pl.col("YEAR") < 2022)
-        denom = pre.select(pl.col("cps_weight").sum()).item() or 0.0
-        numer = pre.filter(pl.col("cell_id").is_not_null() & pl.col("p_RH_workday").is_not_null()) \
-                   .select(pl.col("cps_weight").sum()).item() or 0.0
-        share = (numer / denom) if denom > 0 else None
-        if share is not None:
+        denom = pre.select(pl.col("cps_weight").sum()).item()
+        if denom and denom > 0:
+            numer = pre.filter(pl.col("cell_id").is_not_null() & pl.col("p_RH_workday").is_not_null()) \
+                       .select(pl.col("cps_weight").sum()).item()
+            share = (numer / denom) if numer else 0.0
             logger.info(f"Sanity: pre-2022 weight share with non-missing cell_id & p_RH_workday = {share:.3%} (target ≥ 90%)")
         else:
-            logger.info("Sanity: pre-2022 coverage unavailable (denominator=0)")
+            logger.info("Sanity: pre-2022 coverage unavailable (no relevant data)")
 
-        # 2) ind_broad availability
+        # ind_broad availability
         ind_nonnull = cps_mi.select((pl.col("ind_broad").is_not_null()).mean()).item()
         logger.info(f"Sanity: share of CPS rows with ind_broad non-missing = {ind_nonnull:.3%}")
 
-        # 3) Lambda centering (2022–2025), within occ2×ind_broad
-        if produce_bridge and ("bridge_lambda" in out_paths):
-            # Read back bridge or use in-memory 'bridge'
-            b2 = bridge
-            cell_meta = cps_obs.select(["cell_id", "occ2_harmonized", "ind_broad"]).unique()
-            b2 = b2.join(cell_meta, on="cell_id", how="left")
-            grp = ["occ2_harmonized", "ind_broad"]
-            lambdas = (
-                b2.group_by(grp)
-                  .agg([
-                      pl.col("lambda_remote").median().alias("med_lambda_remote"),
-                      pl.col("lambda_hybrid").median().alias("med_lambda_hybrid"),
-                      pl.col("lambda_inperson").median().alias("med_lambda_inperson"),
-                  ])
-            )
-            # Overall medians across groups
-            med_remote = lambdas.select(pl.col("med_lambda_remote").drop_nulls().median()).item()
-            med_hybrid = lambdas.select(pl.col("med_lambda_hybrid").drop_nulls().median()).item()
-            med_inpers = lambdas.select(pl.col("med_lambda_inperson").drop_nulls().median()).item()
-            if med_remote is None:
-                med_remote = float("nan")
-            if med_hybrid is None:
-                med_hybrid = float("nan")
-            if med_inpers is None:
-                med_inpers = float("nan")
-            logger.info(f"Sanity: median λ across occ2×ind_broad — remote={med_remote:.3f}, hybrid={med_hybrid:.3f}, inperson={med_inpers:.3f} (expect ~1)")
-        else:
-            logger.info("Sanity: bridge not produced; skipping λ centering check.")
+        # Lambda centering check
+        if produce_bridge and bridge is not None and len(bridge) > 0:
+            med_remote = bridge.select(pl.col("lambda_remote").drop_nulls().median()).item()
+            med_hybrid = bridge.select(pl.col("lambda_hybrid").drop_nulls().median()).item()
+            med_inpers = bridge.select(pl.col("lambda_inperson").drop_nulls().median()).item()
+            logger.info(f"Sanity: Overall median λ — remote={med_remote:.3f}, hybrid={med_hybrid:.3f}, inperson={med_inpers:.3f} (expect ~1)")
     except Exception as e:
         logger.warning(f"Sanity checks failed: {e}")
+
     return out_paths
 
 def main() -> None:
     cfg = load_config()
     # Run base pipelines if needed
-    atus_link = atus_pipeline(cfg)
+    # atus_link = atus_pipeline(cfg)
     # print(f"ATUS link written: {atus_link}")
-    cps_out = cps_pipeline(cfg)
+    # cps_out = cps_pipeline(cfg)
     # print(f"CPS processed written: {cps_out}")
     # Build Stata-ready artifacts
     pre_paths = preestimation_procedure(cfg)

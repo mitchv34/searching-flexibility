@@ -1,0 +1,65 @@
+Precompiling OptimizationOptimJL...
+    OptimizationOptimJL Being precompiled by another process (pid: 2796518, pidfile: /home/v/valdsbobes/.julia/compiled/v1.11/OptimizationOptimJL/d3R9i_xTxTN.ji.pidfile)
+  15788.5 ms  ✓ OptimizationOptimJL
+  1 dependency successfully precompiled in 18 seconds. 143 already precompiled.
+┌ Info: Logging configured
+│   level = "INFO"
+└   file = "/project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/../../../logs/optimization_20250827_152942.log"
+┌ Info: Starting production ensemble optimization
+│   args =
+│    Dict{String, Any} with 4 entries:
+│      "log-level"  => "INFO"
+│      "config"     => "test_neldermeand_config_3.yaml"
+│      "dry-run"    => false
+└      "candidates" => 30
+┌ Info: Configuration loaded and validated
+└   config_path = "test_neldermeand_config_3.yaml"
+[ Info: Loading diverse candidates
+┌ Info: Loading diverse top candidates
+│   config_path = "test_neldermeand_config_3.yaml"
+│   n = 30
+└   quality_quantile = 0.1
+┌ Info: Configuration loaded and validated
+└   config_path = "test_neldermeand_config_3.yaml"
+┌ Error: Failed to load diverse top candidates
+│   exception =
+│    ArgumentError: GA results CSV not found: src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results/mpi_search_results_job3056705_valid_objectives.csv
+│    Stacktrace:
+│     [1] load_diverse_top_candidates(; config_path::String, n::Int64, quality_quantile::Float64)
+│       @ Main /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:160
+│     [2] main(args::Dict{String, Any})
+│       @ Main /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:719
+│     [3] top-level scope
+│       @ none:10
+│     [4] eval
+│       @ ./boot.jl:430 [inlined]
+│     [5] exec_options(opts::Base.JLOptions)
+│       @ Base ./client.jl:296
+│     [6] _start()
+│       @ Base ./client.jl:531
+└ @ Main /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:225
+┌ Error: Optimization failed
+│   exception =
+│    ArgumentError: GA results CSV not found: src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results/mpi_search_results_job3056705_valid_objectives.csv
+│    Stacktrace:
+│     [1] load_diverse_top_candidates(; config_path::String, n::Int64, quality_quantile::Float64)
+│       @ Main /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:160
+│     [2] main(args::Dict{String, Any})
+│       @ Main /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:719
+│     [3] top-level scope
+│       @ none:10
+│     [4] eval
+│       @ ./boot.jl:430 [inlined]
+│     [5] exec_options(opts::Base.JLOptions)
+│       @ Base ./client.jl:296
+│     [6] _start()
+│       @ Base ./client.jl:531
+└ @ Main /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:747
+ERROR: ArgumentError: GA results CSV not found: src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results/mpi_search_results_job3056705_valid_objectives.csv
+Stacktrace:
+ [1] load_diverse_top_candidates(; config_path::String, n::Int64, quality_quantile::Float64)
+   @ Main /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:160
+ [2] main(args::Dict{String, Any})
+   @ Main /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:719
+ [3] top-level scope
+   @ none:10

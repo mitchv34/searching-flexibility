@@ -1,0 +1,554 @@
+┌ Info: Logging configured
+│   level = "INFO"
+└   file = "/project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/../../../logs/optimization_20250827_154539.log"
+┌ Info: Starting production ensemble optimization
+│   args =
+│    Dict{String, Any} with 4 entries:
+│      "log-level"  => "INFO"
+│      "config"     => "src/structural_model_heterogenous_preferences/local_obj…
+│      "dry-run"    => false
+└      "candidates" => 10
+┌ Info: Configuration loaded and validated
+└   config_path = "src/structural_model_heterogenous_preferences/local_objective_search/test_neldermeand_config_1.yaml"
+[ Info: Loading diverse candidates
+┌ Info: Loading diverse top candidates
+│   config_path = "src/structural_model_heterogenous_preferences/local_objective_search/test_neldermeand_config_1.yaml"
+│   n = 10
+└   quality_quantile = 0.1
+┌ Info: Configuration loaded and validated
+└   config_path = "src/structural_model_heterogenous_preferences/local_objective_search/test_neldermeand_config_1.yaml"
+┌ Info: Loading GA results
+└   csv_path = "/project/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results/mpi_search_results_job3056705_valid_objectives.csv"
+┌ Info: GA results loaded
+│   total_candidates = 33527
+└   best_objective = 0.16250874335155027
+┌ Info: Quality pool selected
+│   pool_size = 3353
+└   from_total = 33527
+[ Info: Diverse candidates selected
+[ Info: Building optimization problem
+┌ Info: Building ensemble optimization problem
+└   n_candidates = 10
+[ Info: Building problem context
+┌ Info: Building problem context
+└   moment_filter = nothing
+┌ Info: Ensemble problem built successfully
+└   n_trajectories = 10
+[ Info: Starting optimization
+┌ Info: Starting optimization
+│   optimizer_name = "NelderMead"
+│   max_iters = 2000
+│   g_tol = 1.0e-6
+└   n_trajectories = 10
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+[ Info: RHS-variable high_ψ is collinear with the fixed effects.
+┌ Info: Optimization completed
+│   round(elapsed_time, digits = 2) = 3494.34
+│   n_successful = 7
+│   length(solution) = 10
+└   return_codes = 10-element Vector{SciMLBase.ReturnCode.T}: …
+┌ Info: Trajectory 1 results
+│   s.retcode = ReturnCode.Success = 1
+│   s.objective = 477.08910428065843
+│   s.original.iterations = 779
+│   s.original.f_calls = 2063
+└   s.original.g_calls = 0
+┌ Info: Trajectory 2 results
+│   s.retcode = ReturnCode.Success = 1
+│   s.objective = 477.74714712569465
+│   s.original.iterations = 1944
+│   s.original.f_calls = 3752
+└   s.original.g_calls = 0
+┌ Info: Trajectory 3 results
+│   s.retcode = ReturnCode.Success = 1
+│   s.objective = 470.9662819150528
+│   s.original.iterations = 1055
+│   s.original.f_calls = 2322
+└   s.original.g_calls = 0
+┌ Info: Trajectory 4 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 453.364280174988
+│   s.original.iterations = 2000
+│   s.original.f_calls = 3679
+└   s.original.g_calls = 0
+┌ Info: Trajectory 5 results
+│   s.retcode = ReturnCode.Success = 1
+│   s.objective = 533.5036114813917
+│   s.original.iterations = 1103
+│   s.original.f_calls = 2367
+└   s.original.g_calls = 0
+┌ Info: Trajectory 6 results
+│   s.retcode = ReturnCode.Success = 1
+│   s.objective = 478.4663139763376
+│   s.original.iterations = 902
+│   s.original.f_calls = 1839
+└   s.original.g_calls = 0
+┌ Info: Trajectory 7 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 510.78651552837033
+│   s.original.iterations = 2000
+│   s.original.f_calls = 3858
+└   s.original.g_calls = 0
+┌ Info: Trajectory 8 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 541.9220810652826
+│   s.original.iterations = 2000
+│   s.original.f_calls = 3728
+└   s.original.g_calls = 0
+┌ Info: Trajectory 9 results
+│   s.retcode = ReturnCode.Success = 1
+│   s.objective = 469.5209537590512
+│   s.original.iterations = 1152
+│   s.original.f_calls = 2268
+└   s.original.g_calls = 0
+┌ Info: Trajectory 10 results
+│   s.retcode = ReturnCode.Success = 1
+│   s.objective = 507.0224198639336
+│   s.original.iterations = 1013
+│   s.original.f_calls = 2345
+└   s.original.g_calls = 0
+[ Info: Analyzing and saving results
+[ Info: Analyzing optimization results
+[ Info: Re-evaluating initial objectives for fair comparison
+[ Info: Best solution found
+┌ Info: Results saved
+└   file = "/project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/../../../output/optimization_results_20250827_164415.csv"
+┌ Info: Best parameters saved
+└   file = "/project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/../../../output/best_parameters_20250827_164415.csv"
+┌ Info: Summary saved
+└   file = "/project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/../../../output/optimization_summary_20250827_164415.json"
+[ Info: Optimization completed successfully

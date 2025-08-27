@@ -1,0 +1,51 @@
+Output:
+  results_dir: "output/test_run/array_2"
+  overwrite: true
+  summary_file: "test_neldermead_summary_2.json"
+  detailed_prefix: "test_neldermead_start_2"
+  save_each_start: true
+ModelInputs:
+  weighting_matrix_csv: "/project/high_tech_ind/searching-flexibility/data/results/data_moments/smm_weighting_matrix_2024.csv"
+  config_path: "/project/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/distributed_mpi_search/mpi_search_config.yaml"
+  sim_data_path: "/project/high_tech_ind/searching-flexibility/data/processed/simulation_scaffolding_2024.feather"
+  data_moments_yaml: "/project/high_tech_ind/searching-flexibility/data/results/data_moments/data_moments_2024.yaml"
+  moment_filter: []
+Logging:
+  verbose: true
+  timestamp_runs: true
+  log_file: "test_neldermead.log"
+GlobalSearchResults:
+  n_top_starts: 10
+  parameter_subset: []
+  config_path: "/project/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/distributed_mpi_search/mpi_search_config.yaml"
+  min_relative_obj_gap: 1.0e-5
+  latest_results_file: "/project/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results/mpi_search_results_job{job_id}_valid_objectives.csv"
+  deduplicate_exact: true
+  job_id: 3056705
+SlurmConfig:
+  job_name: "test_neldermead_30"
+  total_candidates: 30
+  exclusive: false
+  batch_size: 10
+  output_dir: "src/structural_model_heterogenous_preferences/local_objective_search/slurm_output/test_run"
+  log_prefix: "test_neldermead"
+  account: ""
+  email: ""
+  time_limit: "1:00:00"
+  cores_per_job: 10
+  constraint: ""
+  memory_per_job: "32GB"
+  qos: ""
+  partition: "econ-grad-short"
+  email_type: "END,FAIL"
+OptimizationSettings:
+  function_reltol: 1.0e-10
+  optimizer: "NelderMead"
+  max_iterations: 2000
+  parameter_abstol: 1.0e-10
+  parameter_reltol: 1.0e-10
+  parallel:
+    use_threads: true
+    max_threads: 0
+  gradient_tolerance: 1.0e-6
+  function_abstol: 1.0e-10

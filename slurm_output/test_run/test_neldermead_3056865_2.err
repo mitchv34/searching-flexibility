@@ -1,0 +1,178 @@
+┌ Info: Logging configured
+│   level = "INFO"
+└   file = "/project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/../../../logs/optimization_20250827_153610.log"
+┌ Info: Starting production ensemble optimization
+│   args =
+│    Dict{String, Any} with 4 entries:
+│      "log-level"  => "INFO"
+│      "config"     => "src/structural_model_heterogenous_preferences/local_obj…
+│      "dry-run"    => false
+└      "candidates" => 20
+┌ Info: Configuration loaded and validated
+└   config_path = "src/structural_model_heterogenous_preferences/local_objective_search/test_neldermeand_config_2.yaml"
+[ Info: Loading diverse candidates
+┌ Info: Loading diverse top candidates
+│   config_path = "src/structural_model_heterogenous_preferences/local_objective_search/test_neldermeand_config_2.yaml"
+│   n = 20
+└   quality_quantile = 0.1
+┌ Info: Configuration loaded and validated
+└   config_path = "src/structural_model_heterogenous_preferences/local_objective_search/test_neldermeand_config_2.yaml"
+┌ Info: Loading GA results
+└   csv_path = "/project/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results/mpi_search_results_job3056705_valid_objectives.csv"
+┌ Info: GA results loaded
+│   total_candidates = 33527
+└   best_objective = 0.16250874335155027
+┌ Info: Quality pool selected
+│   pool_size = 3353
+└   from_total = 33527
+[ Info: Diverse candidates selected
+[ Info: Building optimization problem
+┌ Info: Building ensemble optimization problem
+└   n_candidates = 20
+[ Info: Building problem context
+┌ Info: Building problem context
+└   moment_filter = nothing
+┌ Info: Ensemble problem built successfully
+└   n_trajectories = 20
+[ Info: Starting optimization
+┌ Info: Starting optimization
+│   optimizer_name = "NelderMead"
+│   max_iters = 2
+│   g_tol = 1.0e-6
+└   n_trajectories = 20
+┌ Info: Optimization completed
+│   round(elapsed_time, digits = 2) = 54.72
+│   n_successful = 0
+│   length(solution) = 20
+└   return_codes = 20-element Vector{SciMLBase.ReturnCode.T}: …
+┌ Info: Trajectory 1 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 650.8158782937898
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 2 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 629.2927166816695
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 3 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 619.4425342419808
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 4 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 614.3186355670251
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 5 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 606.6774460513765
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 6 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 673.6358730868145
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 7 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 630.7693183192206
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 8 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 654.9790196000102
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 9 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 631.6329108063155
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 10 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 596.9912999946799
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 11 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 638.6376082951327
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 12 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 664.8890694073305
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 13 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 634.3984379273852
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 14 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 671.9042341522718
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 15 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 663.3192518037779
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 16 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 665.0579189737554
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 17 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 584.7750290908615
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 18 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 951.4212953867479
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 19 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 648.596314798301
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+┌ Info: Trajectory 20 results
+│   s.retcode = ReturnCode.Failure = 10
+│   s.objective = 640.2916766698739
+│   s.original.iterations = 2
+│   s.original.f_calls = 15
+└   s.original.g_calls = 0
+[ Info: Analyzing and saving results
+[ Info: Analyzing optimization results
+[ Info: Re-evaluating initial objectives for fair comparison
+[ Info: Best solution found
+┌ Info: Results saved
+└   file = "/project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/../../../output/optimization_results_20250827_153731.csv"
+┌ Info: Best parameters saved
+└   file = "/project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/../../../output/best_parameters_20250827_153731.csv"
+┌ Info: Summary saved
+└   file = "/project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/../../../output/optimization_summary_20250827_153731.json"
+[ Info: Optimization completed successfully

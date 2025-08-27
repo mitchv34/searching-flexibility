@@ -1,0 +1,38 @@
+MPISearchConfig:
+  algorithm: "genetic_algorithm"
+  n_samples: 100000
+  parameters:
+    names: ["aₕ", "bₕ", "c₀", "μ", "χ", "ν", "ψ₀", "ϕ", "κ₀"]
+    bounds:
+      aₕ: [1.0, 10.0]
+      bₕ: [1.0, 10.0]
+      c₀: [0.0001, 2.0]
+      μ:  [0.0001, 0.2]
+      χ:  [0.0005, 10.0]
+      ν:  [0.01, 3.0]
+      ψ₀: [0.0, 3.0]
+      ϕ:  [0.01, 3.0]
+      κ₀: [1.0, 300.0]
+  target_moments:
+    data_file: "data/results/data_moments/data_moments_2024.yaml"
+    moments_to_use: ["var_logwage","mean_alpha","var_alpha","inperson_share","remote_share","p90_p10_logwage","diff_alpha_high_lowpsi","wage_premium_high_psi","wage_slope_psi","market_tightness"]
+  moment_computation:
+    method: "simulation"
+    simulated_data: "data/processed/simulation_scaffolding_2024.feather"
+  search_options:
+    population_size: 96
+    mutation_rate: 0.2
+    crossover_rate: 0.8
+    n_generations: 5
+    elite_fraction: 0.1
+    auto_bound_expansion:
+      enabled: false
+  output:
+    results_dir: "output/mpi_search_results"
+    checkpoint_frequency: 100
+    save_all_results: false
+    detailed_logging: true
+  performance:
+    timing_diagnostics: true
+    memory_monitoring: true
+    convergence_tracking: true

@@ -1,0 +1,59 @@
+# Local Refinement Configuration - TEST VERSION with 3 iterations
+# Tailored for second-stage (local) optimization using outputs of global GA/MPI search
+
+# Source of global search results
+GlobalSearchResults:
+  latest_results_file: "src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results/mpi_search_results_job{job_id}_valid_objectives.csv"
+  job_id: 3056705
+  n_top_starts: 5              # Use only 5 candidates for testing
+  min_relative_obj_gap: 1e-5
+  deduplicate_exact: true
+  parameter_subset: []
+  config_path: "src/structural_model_heterogenous_preferences/distributed_mpi_search/mpi_search_config.yaml"
+
+# Local optimizer settings - TEST VERSION
+LocalOptimizer:
+  algorithm: "LBFGS"
+  max_iters: 3                 # TEST: Only 3 iterations
+  g_tol: 1e-6
+  f_tol: 1e-10
+  store_trace: true
+  show_every: 1                # Show every iteration for testing
+  finite_diff: true
+  fd_step: 1e-6
+  line_search: "default"
+
+# Optimization Settings for production script
+OptimizationSettings:
+  optimizer: "LBFGS"
+  max_iterations: 10           # Increase iterations to see if it runs
+  gradient_tolerance: 1e-4     # Looser gradient tolerance
+  function_tolerance: 1e-8
+  parameter_tolerance: 1e-8
+
+# Penalties (should match objective.jl defaults unless overridden)
+Penalties:
+  non_convergence: 8.0e9
+  degeneracy: 7.5e9
+
+# Model & data inputs
+ModelInputs:
+  config_path: "src/structural_model_heterogenous_preferences/distributed_mpi_search/mpi_search_config.yaml"
+  data_moments_yaml: "data/results/data_moments/data_moments_2024.yaml"
+  weighting_matrix_csv: "data/results/data_moments/smm_weighting_matrix_2024.csv"
+  sim_data_path: "data/processed/simulation_scaffolding_2024.feather"
+  moment_filter: []
+
+# Output for local refinement
+Output:
+  results_dir: "src/structural_model_heterogenous_preferences/local_objective_search/output"
+  save_each_start: true
+  summary_file: "local_refinement_test_summary.json"
+  detailed_prefix: "local_refine_test"
+  overwrite: true
+
+# Logging
+Logging:
+  verbose: true
+  timestamp_runs: true
+  log_file: "local_refine_test.log"

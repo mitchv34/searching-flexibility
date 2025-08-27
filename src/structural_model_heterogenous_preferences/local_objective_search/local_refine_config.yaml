@@ -1,0 +1,116 @@
+# Local Refinement Configuration
+# Tailored for second-stage (local) optimization using outputs of global GA/MPI search
+
+# Source of global search results
+GlobalSearchResults:
+  # Use {job_id} placeholder; replaced at runtime by env LOCAL_GA_JOB_ID or this config's job_id field.
+  # latest_results_file: "src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results/mpi_search_results_job{job_id}_latest.json"
+  latest_results_file: "src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results/mpi_search_results_job{job_id}_valid_objectives.csv"
+  # Optional explicit job id fallback (string or number); if omitted we require env var.
+  job_id: 3056705
+  # Number of top distinct candidates to consider for local starts
+  n_top_starts: 128           # Total candidates across all batches
+  # Minimum separation in objective value (relative) to treat candidate as distinct
+  min_relative_obj_gap: 1e-5
+  # Whether to deduplicate parameter vectors exactly
+  deduplicate_exact: true
+  # Optional: list of parameter names to optimize (subset). If empty -> all GA params
+  parameter_subset: []
+  # Path to configuration used for Global Optimizer
+  config_path: "src/structural_model_heterogenous_preferences/distributed_mpi_search/mpi_search_config.yaml"
+
+# SLURM Configuration for Massive Parallel Optimization
+SlurmConfig:
+  # Job configuration
+  job_name: "local_optimization_ensemble"
+  partition: "cpu"            # SLURM partition to use
+  account: ""                 # SLURM account (if required)
+  qos: ""                     # Quality of Service (if required)
+  
+  # Resource allocation
+  total_candidates: 128       # Total number of starting points
+  batch_size: 32              # Candidates per SLURM job
+  cores_per_job: 32           # CPU cores per SLURM job
+  memory_per_job: "64GB"      # Memory per SLURM job
+  time_limit: "6:00:00"       # Wall time limit per job (HH:MM:SS)
+  
+  # Array job settings (auto-calculated from total_candidates/batch_size)
+  # num_batches: 4            # Will be calculated automatically
+  
+  # Output and error files
+  output_dir: "src/structural_model_heterogenous_preferences/local_objective_search/slurm_output"
+  log_prefix: "local_opt"     # Prefix for SLURM log files
+  
+  # Email notifications (optional)
+  email: ""                   # Email for job notifications (leave empty to disable)
+  email_type: "END,FAIL"      # When to send emails: BEGIN,END,FAIL,REQUEUE,ALL
+  
+  # Advanced settings
+  exclusive: false            # Request exclusive node access
+  constraint: ""              # Node constraints (e.g., "haswell")
+  reservation: ""             # Use specific reservation (if any)
+
+# Optimization Algorithm Settings
+OptimizationSettings:
+  # Optimizer choice: "LBFGS", "BFGS", "NelderMead"
+  optimizer: "LBFGS"
+  
+  # Maximum number of iterations per trajectory
+  max_iterations: 5000
+  
+  # Convergence tolerance for gradient norm (gradient-based optimizers)
+  gradient_tolerance: 1.0e-6
+  
+  # Function tolerance (relative change in objective)
+  function_tolerance: 1.0e-10
+  
+  # Parameter tolerance (relative change in parameters)
+  parameter_tolerance: 1.0e-10
+  
+  # Parallel execution settings
+  parallel:
+    # Use threading for ensemble (true/false)
+    use_threads: true
+    
+    # Maximum number of threads (0 = auto-detect)
+    max_threads: 0
+
+# Local optimizer settings (legacy section for compatibility)
+LocalOptimizer:
+  algorithm: "LBFGS"          # Options: LBFGS, BFGS, NelderMead, SimulatedAnnealing (if implemented)
+  max_iters: 5_000
+  g_tol: 1e-6                  # Gradient norm tolerance (if gradient available)
+  f_tol: 1e-10                 # Objective improvement tolerance
+  store_trace: true
+  show_every: 50
+  finite_diff: true            # Use finite differences for gradient estimation
+  fd_step: 1e-6
+  line_search: "default"      # Placeholder for future line search configuration
+
+# Penalties (should match objective.jl defaults unless overridden)
+Penalties:
+  non_convergence: 8.0e9
+  degeneracy: 7.5e9
+
+# Model & data inputs (re-affirm for clarity; can override demonstration values)
+ModelInputs:
+  config_path: "src/structural_model_heterogenous_preferences/distributed_mpi_search/mpi_search_config.yaml"
+  data_moments_yaml: "data/results/data_moments/data_moments_2024.yaml"
+  weighting_matrix_csv: "data/results/data_moments/smm_weighting_matrix_2024.csv"
+  sim_data_path: "data/processed/simulation_scaffolding_2024.feather"
+  # Optional filter of moment keys to use (empty -> use all from weighting matrix)
+  moment_filter: []
+
+# Output for local refinement
+Output:
+  results_dir: "src/structural_model_heterogenous_preferences/local_objective_search/output"
+  save_each_start: true
+  summary_file: "local_refinement_summary.json"
+  detailed_prefix: "local_refine_start"
+  overwrite: true
+
+# Logging
+Logging:
+  verbose: true
+  timestamp_runs: true
+  log_file: "local_refine.log"

@@ -1,0 +1,52 @@
+state_name,state_fips,censusdiv_name,censusdiv,censusreg,censusreg_name
+Connecticut,09,New England Division,1,1,Northeast Region
+Maine,23,New England Division,1,1,Northeast Region
+Massachusetts,25,New England Division,1,1,Northeast Region
+New Hampshire,33,New England Division,1,1,Northeast Region
+Rhode Island,44,New England Division,1,1,Northeast Region
+Vermont,50,New England Division,1,1,Northeast Region
+New Jersey,34,Middle Atlantic Division,2,1,Northeast Region
+New York,36,Middle Atlantic Division,2,1,Northeast Region
+Pennsylvania,42,Middle Atlantic Division,2,1,Northeast Region
+Illinois,17,East North Central Division,3,2,Midwest Region
+Indiana,18,East North Central Division,3,2,Midwest Region
+Michigan,26,East North Central Division,3,2,Midwest Region
+Ohio,39,East North Central Division,3,2,Midwest Region
+Wisconsin,55,East North Central Division,3,2,Midwest Region
+Iowa,19,West North Central Division,4,2,Midwest Region
+Kansas,20,West North Central Division,4,2,Midwest Region
+Minnesota,27,West North Central Division,4,2,Midwest Region
+Missouri,29,West North Central Division,4,2,Midwest Region
+Nebraska,31,West North Central Division,4,2,Midwest Region
+North Dakota,38,West North Central Division,4,2,Midwest Region
+South Dakota,46,West North Central Division,4,2,Midwest Region
+Delaware,10,South Atlantic Division,5,3,South Region
+District of Columbia,11,South Atlantic Division,5,3,South Region
+Florida,12,South Atlantic Division,5,3,South Region
+Georgia,13,South Atlantic Division,5,3,South Region
+Maryland,24,South Atlantic Division,5,3,South Region
+North Carolina,37,South Atlantic Division,5,3,South Region
+South Carolina,45,South Atlantic Division,5,3,South Region
+Virginia,51,South Atlantic Division,5,3,South Region
+West Virginia,54,South Atlantic Division,5,3,South Region
+Alabama,01,East South Central Division,6,3,South Region
+Kentucky,21,East South Central Division,6,3,South Region
+Mississippi,28,East South Central Division,6,3,South Region
+Tennessee,47,East South Central Division,6,3,South Region
+Arkansas,05,West South Central Division,7,3,South Region
+Louisiana,22,West South Central Division,7,3,South Region
+Oklahoma,40,West South Central Division,7,3,South Region
+Texas,48,West South Central Division,7,3,South Region
+Arizona,04,Mountain Division,8,4,West Region
+California,06,Mountain Division,8,4,West Region
+Colorado,08,Mountain Division,8,4,West Region
+Idaho,16,Mountain Division,8,4,West Region
+Montana,30,Mountain Division,8,4,West Region
+Nevada,32,Mountain Division,8,4,West Region
+New Mexico,35,Mountain Division,8,4,West Region
+Utah,49,Mountain Division,8,4,West Region
+Wyoming,56,Mountain Division,8,4,West Region
+Alaska,02,Pacific Division,9,4,West Region
+Hawaii,15,Pacific Division,9,4,West Region
+Oregon,41,Pacific Division,9,4,West Region
+Washington,53,Pacific Division,9,4,West Region

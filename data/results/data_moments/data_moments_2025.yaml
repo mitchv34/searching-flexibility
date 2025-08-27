@@ -1,0 +1,30 @@
+# Data moments for year 2025
+# Generated on: 2025-08-26
+
+DataMoments:
+  mean_logwage: 3.122079
+  var_logwage: 0.437152
+  p90_p10_logwage: 1.468558
+  mean_alpha: 0.137114
+  var_alpha: 0.094461
+  inperson_share: 0.825278
+  hybrid_share: 0.076055
+  remote_share: 0.098666
+  agg_productivity: 1.155400
+  diff_alpha_high_lowpsi: 0.273840
+  market_tightness: 1.070000
+  job_finding_rate: null
+  diff_logwage_inperson_remote: -0.108440
+  wage_premium_high_psi: -0.056818
+  wage_slope_psi: 0.089600
+  wage_alpha: 0.556659
+  wage_alpha_curvature: -0.446362
+  mean_logwage_inperson: null
+  mean_logwage_remote: null
+  mean_logwage_RH_lowpsi: null
+  mean_logwage_RH_highpsi: null
+  mean_alpha_highpsi: 0.336416
+  mean_alpha_lowpsi: 0.062576
+  var_logwage_highpsi: null
+  var_logwage_lowpsi: null
+  ratio_var_logwage_high_lowpsi: null

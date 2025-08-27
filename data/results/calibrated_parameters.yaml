@@ -1,0 +1,53 @@
+# Calibrated Parameters
+# Generated on: 23 Aug 2025 at 14:34:43
+# Source: estimate_gamma1.do
+
+# Matching function elasticity parameter (full sample)
+γ₁:
+  value:  0.766776
+  standard_error:  0.044046
+  description: 'Matching function elasticity parameter from Hall & Schulhofer-Wohl (2018) methodology'
+  source: 'Estimated from BLS state-level panel data (full sample)'
+
+  # Auxiliary regression information
+  regression_info:
+    ln_theta_coefficient:  0.233224
+    ln_theta_se:  0.044046
+    r_squared_within:  0.636509
+    n_observations:      6300
+    n_groups:        50
+    relationship: 'gamma_1 = 1 - coefficient_on_ln_theta'
+
+# Robustness check: Pre-COVID sample (excluding 2020-2021)
+pre_γ₁:
+  value:  0.755287
+  standard_error:  0.041738
+  description: 'Matching function elasticity parameter (pre-COVID robustness check)'
+  source: 'Estimated from BLS state-level panel data (2015-2019)'
+
+  # Auxiliary regression information
+  regression_info:
+    ln_theta_coefficient:  0.244713
+    ln_theta_se:  0.041738
+    r_squared_within:  0.453844
+    n_observations:      3000
+    n_groups:        50
+    sample_period: '2015-2019'
+    relationship: 'gamma_1 = 1 - coefficient_on_ln_theta'
+
+# Robustness check: Post-COVID sample (2022 onwards)
+post_γ₁:
+  value:  0.780817
+  standard_error:  0.050730
+  description: 'Matching function elasticity parameter (post-COVID robustness check)'
+  source: 'Estimated from BLS state-level panel data (2022-2025)'
+
+  # Auxiliary regression information
+  regression_info:
+    ln_theta_coefficient:  0.219183
+    ln_theta_se:  0.050730
+    r_squared_within:  0.355947
+    n_observations:      2100
+    n_groups:        50
+    sample_period: '2022-2025'
+    relationship: 'gamma_1 = 1 - coefficient_on_ln_theta'

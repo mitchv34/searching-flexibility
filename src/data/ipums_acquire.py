@@ -575,72 +575,6 @@ def post_process_dataset(name: str, ds_cfg, output_dir: Path) -> None:
             except Exception as e:
                 LOGGER.error(f"❌ [{name}] Failed to process single extract: {e}")
                 return
-            
-            ddi_path = ddi_paths[0]
-            try:
-                ddi = readers.read_ipums_ddi(ddi_path)
-                data_file_path = _resolve_ipums_data_path(output_dir, ddi)
-
-                if not data_file_path:
-                    LOGGER.warning(f"⚠️ [{name}] Data file not found for {ddi_path.name}")
-                    return
-
-                # Build output base name
-                years = year_range(ds_cfg.years_start, ds_cfg.years_end)
-                start_year, final_year = years[0], years[-1]
-                if getattr(ds_cfg, "output_filename", None):
-                    base_name = ds_cfg.output_filename.format(start_year=start_year, final_year=final_year)
-                else:
-                    base_name = f"{name.lower()}_{start_year}_{final_year}"
-
-                # Rename data file directly (no read/write needed!)
-                if data_file_path.suffix.lower() == ".gz":
-                    output_csv = output_dir / f"{base_name}.csv.gz"
-                else:
-                    output_csv = output_dir / f"{base_name}.csv"
-                
-                data_file_path.replace(output_csv)
-                LOGGER.info(f"� [{name}] Renamed data file: {data_file_path.name} → {output_csv.name}")
-
-                # Get basic file info without reading the entire dataset
-                file_size_mb = output_csv.stat().st_size / (1024 * 1024)
-                LOGGER.info(f"� [{name}] Dataset size: {file_size_mb:.1f} MB")
-
-                # Optional: Quick telework variables check for CPS (only if requested)
-                if name.lower() == "cps" and hasattr(ds_cfg, 'variables'):
-                    telework_vars = {'TELWORK', 'TELWRKHR', 'TELWRKPAY'}
-                    requested_telework = set(ds_cfg.variables) & telework_vars
-                    if requested_telework:
-                        LOGGER.info(f"📊 [{name}] Telework variables requested: {sorted(requested_telework)}")
-                        LOGGER.info(f"   ℹ️  These will have values for 2022+ samples and NULL for 2013-2021")
-
-                # Rename DDI file
-                new_xml_path = output_dir / f"{base_name}.xml"
-                ddi_path.replace(new_xml_path)
-                LOGGER.info(f"📄 [{name}] Renamed DDI file: {ddi_path.name} → {new_xml_path.name}")
-
-                # Clean up any other files (but keep our renamed files)
-                files_to_keep = {output_csv.name, new_xml_path.name}
-                for file_path in output_dir.iterdir():
-                    if file_path.name in files_to_keep:
-                        continue
-                    try:
-                        if file_path.is_dir():
-                            import shutil
-                            shutil.rmtree(file_path)
-                        else:
-                            file_path.unlink()
-                        LOGGER.debug(f"🗑️ [{name}] Removed: {file_path.name}")
-                    except Exception as e:
-                        LOGGER.warning(f"⚠️ [{name}] Failed to remove {file_path.name}: {e}")
-
-                remaining_files = [f.name for f in output_dir.iterdir()]
-                LOGGER.info(f"🧹 [{name}] Single file processing complete. Final files: {remaining_files}")
-                LOGGER.info(f"✅ [{name}] Processing complete - no data reading/writing needed!")
-
-            except Exception as e:
-                LOGGER.error(f"❌ [{name}] Failed to process single extract: {e}")
-                return
 
         else:
             # Multiple extracts - use original concatenation logic
@@ -881,14 +815,6 @@ def download_when_ready(client: IpumsApiClient, collection: str, extract_id: Any
     raise TimeoutError(f"⏰ Extract {extract_id} for {collection} not ready after {max_wait_time} seconds")
 
 
-def submit_and_download(client: IpumsApiClient, collection: str, samples: List[str], variables: List[str], output_dir: Path) -> None:
-    """
-    Legacy function that submits and downloads in sequence (kept for compatibility).
-    """
-    extract_id, description = submit_extract(client, collection, samples, variables)
-    download_when_ready(client, collection, extract_id, description, output_dir)
-
-
 def acquire_all_datasets_concurrent(client: IpumsApiClient, cfg: Config, log_file: Path) -> None:
     """
     Acquires all enabled datasets concurrently by submitting all extracts first,
@@ -1004,56 +930,6 @@ def acquire_all_datasets_concurrent(client: IpumsApiClient, cfg: Config, log_fil
     
     LOGGER.info("🎉 === All datasets completed successfully! ===")
     LOGGER.info(f"📄 Full log saved to: {log_file}")
-
-
-def acquire_dataset(client: IpumsApiClient, name: str, cfg: Config, ds_cfg: DatasetConfig) -> None:
-    """
-    Acquires and downloads a dataset from the IPUMS API client according to the provided configuration.
-
-    This function:
-    - Resolves the list of samples to acquire.
-    - Cleans the download directory for the specific dataset.
-    - Downloads the data in chunks, respecting the maximum samples per extract.
-    - Saves files directly to the appropriate output directory.
-
-    Parameters:
-        client (IpumsApiClient): The IPUMS API client used to submit and download data extracts.
-        name (str): The name of the dataset to acquire (e.g., "ATUS", "ACS", "CPS").
-        cfg (Config): Global configuration object containing directory paths and other settings.
-        ds_cfg (DatasetConfig): Dataset-specific configuration, including enabled flag, variables, years, and output filenames.
-
-    Returns:
-        None
-
-    Logs:
-        - Skips disabled datasets.
-        - Logs progress for each chunk submission and data download.
-    """
-    if not ds_cfg.enabled:
-        LOGGER.info(f"Dataset '{name}' is disabled; skipping.")
-        return
-
-    # Resolve the list of samples to acquire for this dataset
-    samples = resolve_samples_for(name, ds_cfg)
-    max_per = ds_cfg.max_samples_per_extract or 12
-    LOGGER.info(f"Acquiring {name} ({ds_cfg.collection}) for {len(samples)} samples.")
-
-    # Determine output directory - all datasets save to raw_dir now
-    output_dir = Path(cfg.raw_dir) / name.lower()
-    
-    # Clean the download folder before starting (only for this specific dataset)
-    clean_download_folder(name, output_dir)
-    
-    ensure_dir(output_dir)
-
-    # Download data in chunks, if necessary
-    for i, chunk in enumerate(chunked(samples, max_per), start=1):
-        LOGGER.info(f"Submitting chunk {i}/{math.ceil(len(samples)/max_per)} with {len(chunk)} samples…")
-        chunk_output_dir = output_dir / f"chunk_{i}" if len(samples) > max_per else output_dir
-        submit_and_download(client, ds_cfg.collection, chunk, ds_cfg.variables, chunk_output_dir)
-
-    LOGGER.info(f"Completed downloading {name} to {output_dir}")
-
 
 def main(argv: List[str] | None = None) -> None:
     """
