@@ -1,6 +1,7 @@
 using Pkg
 # activate project containing Project.toml (adjust path if needed)
-Pkg.activate("../../..")
+project_root = joinpath(@__DIR__, "..", "..")
+Pkg.activate(project_root)
 Pkg.instantiate()
 
 using Distributed
@@ -24,7 +25,7 @@ include(joinpath(ROOT, "ModelPlotting.jl"))
 
 # --- REPL runner ---
 # Point to the configuration file
-config = "src/structural_model_new/model_parameters.yaml"
+config = joinpath(@__DIR__, "model_parameters.yaml")
 # Initialize the model
 prim, res = initializeModel(config);
 @show prim.c₀
@@ -34,6 +35,8 @@ new_prim, new_res = update_primitives_results(prim, res, Dict(:c₀ => prim.c₀
 
 
 # --- 1. Central Setup (Done on the main processor) ---
+# Parameters to estimate (you can modify this list as needed)
+params_to_estimate = [:c₀, :χ, :A₁, :ν, :ψ₀, :ϕ, :κ₀]
 
 # Load the model and solve for the "true" state
 prim_true, res_true = initializeModel(config);

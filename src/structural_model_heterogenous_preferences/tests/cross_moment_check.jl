@@ -1,9 +1,13 @@
 using Pkg
-Pkg.activate("/project/high_tech_ind/searching-flexibility")
+project_root = joinpath(@__DIR__, "..", "..", "..")
+Pkg.activate(project_root)
 Pkg.instantiate()
 
 using Distributed
 addprocs(9)
+
+# Define the model configuration
+const MODEL_CONFIG = joinpath(@__DIR__, "..", "model_parameters.yaml")
 
 const ROOT = @__DIR__
 @everywhere begin
