@@ -8,6 +8,7 @@
 using Random, Statistics, Distributions, LinearAlgebra, ForwardDiff
 using Interpolations  # Needed for linear_interpolation in simulate_model_data
 using Printf, YAML
+using Arrow
 
 # --- Moment / Regression Constants (added) ---
 # Minimum sample sizes for reliable regression-based moments
@@ -25,6 +26,42 @@ using FixedEffectModels # For regression-based moment computation
 
 # Global cache for simulation scaffolding datasets (path => DataFrame) to avoid repeated disk I/O
 const _SIM_SCAFFOLD_CACHE = Dict{String, DataFrame}()
+
+# ---------------------------------------------------------------------------
+# Degeneracy warning throttle refs (defensive global initialization)
+# These are defined at top-level so they're always present on every worker
+# as soon as this file is included. We avoid conditional creation inside
+# performance-sensitive inner loops to eliminate UndefVarError races.
+# Environment variable DEGEN_WARN_LIMIT can cap warnings (default 10).
+const _DEGEN_WARN_COUNT_REF = Ref(0)
+const _DEGEN_WARN_LIMIT_REF = Ref(try parse(Int, get(ENV, "DEGEN_WARN_LIMIT", "10")) catch; 10 end)
+
+"""
+    _reset_degeneracy_warning_counters!()
+
+Reset (on demand / in tests) the degeneracy warning throttle counters.
+Safe to call on any worker.
+"""
+function _reset_degeneracy_warning_counters!()
+    _DEGEN_WARN_COUNT_REF[] = 0
+end
+
+"""
+    _next_degeneracy_warning_allowed() -> Bool
+
+Increment counter if still below limit and return whether a warning should
+be emitted. This encapsulates the throttle logic; callers just check the
+returned Bool before @warn.
+"""
+@inline function _next_degeneracy_warning_allowed()
+    c = _DEGEN_WARN_COUNT_REF[]
+    lim = _DEGEN_WARN_LIMIT_REF[]
+    if c < lim
+        _DEGEN_WARN_COUNT_REF[] = c + 1
+        return true
+    end
+    return false
+end
 
 """
     _weighted_quantile(values, weights, q)
@@ -62,6 +99,7 @@ function update_primitives_results(
                                     params_to_update::Dict=Dict();
                                     kwargs...,
                                 )
+    
     # --- Stage 1: Read current values or overrides (type-stable locals) ---
     # Scalars
     A₀   = get(params_to_update, :A₀, prim.A₀)
@@ -146,7 +184,7 @@ end
 
 function update_params_and_resolve(prim::Primitives, res::Results; params_to_update=Dict() , kwargs...)
     KW = Dict(kwargs)
-    new_prim, new_res = update_primitives_results(prim, res, params_to_update; kwargs...)
+    new_prim, new_res = update_primitives_results(prim, res, params_to_update)
     tol        = get(KW, :tol, 1e-7)
     max_iter   = get(KW, :max_iter, 25000)
     verbose    = get(KW, :verbose, false)
@@ -196,7 +234,7 @@ function _calculate_policy_arrays(prim::Primitives)
             # --- STEP 1: Find the maximum value of V(α) for rescaling ---
             V_func(a) = V_alpha(a, i, j)
             # Sample on a fine grid to find a robust maximum
-            alpha_grid_fine = 0.0:0.01:1.0
+            alpha_grid_fine = zero(eltype(h_grid)):convert(eltype(h_grid), 0.01):one(eltype(h_grid))
             V_max = maximum(V_func(a) for a in alpha_grid_fine)
 
             # --- STEP 2: Define the STABLE integrand ---
@@ -209,8 +247,8 @@ function _calculate_policy_arrays(prim::Primitives)
             # Under extreme curvature parameters integral_of_exp can underflow to 0.0 → log(0) = -Inf
             # That propagates to p_alpha_func => Inf / Inf → NaN PDF values → NaN CDF knots (triggering Interpolations warning).
             # Guard: if integral_of_exp is nonpositive or NaN, approximate with a tiny epsilon preserving maximum location.
-            if !(isfinite(integral_of_exp)) || integral_of_exp <= 0.0
-                integral_of_exp = eps(Float64)
+            if !(isfinite(integral_of_exp)) || integral_of_exp <= zero(typeof(integral_of_exp))
+                integral_of_exp = eps(typeof(integral_of_exp))
             end
 
             # --- STEP 4: Combine results using the numerically stable formula ---
@@ -233,8 +271,8 @@ end
 function calculate_average_policies(
                                     prim::Primitives{T}, 
                                     res::Results{T};
-                                    αtol_inperson::Float64 = 0.1,
-                                    αtol_remote::Float64 = 0.9
+                                    αtol_inperson::T = T(0.1),
+                                    αtol_remote::T = T(0.9)
                                 ) where {T<:Real}
     
     @unpack n_h, n_ψ, β, δ, ξ, c₀ = prim
@@ -273,7 +311,7 @@ function calculate_average_policies(
             
             # Define the wage and log-wage functions (same as before)
             wage_func(α) = base_wage_component[i, j] + c₀ * (1 - α)
-            log_wage_func(α) = log(max(1e-12, wage_func(α)))
+            log_wage_func(α) = log(max(eps(eltype(base_wage_component)), wage_func(α)))
 
             # E[log(w) * I(In-Person) | h,ψ] = ∫ from 0 to α_tol of log(w(α))p(α|h,ψ) dα
             exp_logw_inperson[i, j], _ = quadgk(α -> log_wage_func(α) * p_alpha_func(α, i, j), 0.0, αtol_inperson, rtol=1e-6)
@@ -430,7 +468,7 @@ function simulate_model_data(prim::Primitives, res::Results, path_to_data::Strin
         end
         
         # Create linear interpolator for inverse CDF sampling
-        alpha_sampler = linear_interpolation(knots, vals, extrapolation_bc=Flat())
+        alpha_sampler = linear_interpolation(knots, vals, extrapolation_bc=Interpolations.Flat())
 
         # --- Apply the sampler to all workers in this group ---
         group_indices = parentindices(group)[1]
@@ -505,7 +543,7 @@ function compute_model_moments(
     prob_inperson_policy, prob_remote_policy, 
     exp_logw_inperson_policy, exp_logw_remote_policy,
     prob_RH_policy, exp_logw_RH_policy = 
-        calculate_average_policies(prim, res; αtol_inperson=Float64(αtol), αtol_remote=1.0-Float64(αtol))
+        calculate_average_policies(prim, res; αtol_inperson=αtol, αtol_remote=one(T)-αtol)
 
     @unpack h_grid, ψ_grid, ψ_cdf, ψ₀, ν, ϕ, A₀, A₁ = prim
     
@@ -834,23 +872,14 @@ function compute_model_moments_from_simulation(
     wage_alpha = SENTINEL_MOMENT
     wage_alpha_curvature = SENTINEL_MOMENT
     if degeneracy
-        # Throttle warnings: only print up to DEGEN_WARN_LIMIT per process.
-        # Use module-level refs (initialize once per process). Avoid assigning into Main explicitly
-        # to prevent scope errors inside worker function contexts.
-        if !isdefined(@__MODULE__, :_DEGEN_WARN_COUNT_REF)
-            global _DEGEN_WARN_COUNT_REF = Ref(0)
-        end
-        if !isdefined(@__MODULE__, :_DEGEN_WARN_LIMIT_REF)
-            lim = try parse(Int, get(ENV, "DEGEN_WARN_LIMIT", "10")) catch; 10 end
-            global _DEGEN_WARN_LIMIT_REF = Ref(lim)
-        end
-        local count_ref = _DEGEN_WARN_COUNT_REF
-        local limit_ref = _DEGEN_WARN_LIMIT_REF
-        if count_ref[] < limit_ref[]
-            @warn "DEGENERACY TRIGGERED: skipping regression-based moments. Sentinel moments set to $SENTINEL_MOMENT." 
-            count_ref[] += 1
-            if count_ref[] == limit_ref[]
-                @warn "Further degeneracy warnings suppressed (limit=$(limit_ref[]))."
+        # Throttled warning using helper; always safe (refs pre-initialized at top-level)
+        if _next_degeneracy_warning_allowed()
+            local remaining = _DEGEN_WARN_LIMIT_REF[] - _DEGEN_WARN_COUNT_REF[]
+            if remaining >= 0
+                @warn "DEGENERACY TRIGGERED: skipping regression-based moments. Sentinel moments set to $SENTINEL_MOMENT. (warnings left before silence: $remaining)"
+                if remaining == 0
+                    @warn "Further degeneracy warnings suppressed (limit=$(_DEGEN_WARN_LIMIT_REF[]))."
+                end
             end
         end
         # println("DEGENERACY TRIGGERED: skipping regression-based moments.")

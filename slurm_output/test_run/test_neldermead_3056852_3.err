@@ -1,0 +1,51 @@
+Precompiling Revise...
+    OrderedCollections Being precompiled by another machine (hostname: slurm109.ssc.wisc.edu, pid: 2660049, pidfile: /home/v/valdsbobes/.julia/compiled/v1.11/OrderedCollections/LtT3J_xTxTN.ji.pidfile)
+    Requires Being precompiled by another machine (hostname: slurm109.ssc.wisc.edu, pid: 2660049, pidfile: /home/v/valdsbobes/.julia/compiled/v1.11/Requires/IyxeS_xTxTN.ji.pidfile)
+    CodeTracking Being precompiled by another machine (hostname: slurm109.ssc.wisc.edu, pid: 2660049, pidfile: /home/v/valdsbobes/.julia/compiled/v1.11/CodeTracking/a3E2l_xTxTN.ji.pidfile)
+  10331.3 ms  ✓ OrderedCollections
+  10158.3 ms  ✓ CodeTracking
+    LoweredCodeUtils Being precompiled by another machine (hostname: slurm109.ssc.wisc.edu, pid: 2660049, pidfile: /home/v/valdsbobes/.julia/compiled/v1.11/LoweredCodeUtils/zWkaN_xTxTN.ji.pidfile)
+  20213.4 ms  ✓ Requires
+  10098.0 ms  ✓ LoweredCodeUtils
+    Revise Being precompiled by another machine (hostname: slurm109.ssc.wisc.edu, pid: 2660049, pidfile: /home/v/valdsbobes/.julia/compiled/v1.11/Revise/M1Qoh_xTxTN.ji.pidfile)
+  20278.5 ms  ✓ Revise
+  5 dependencies successfully precompiled in 42 seconds. 14 already precompiled.
+ERROR: LoadError: ParseError:
+# Error @ /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/modify_config_3.jl:18:59
+# Modify output directory to include array task ID
+config["Output"]["results_dir"] = "output/test_run/array_${array_id}"
+#                                                         └ ── identifier or parenthesized expression expected after $ in string
+Stacktrace:
+ [1] top-level scope
+   @ /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/modify_config_3.jl:18
+in expression starting at /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/modify_config_3.jl:18
+ERROR: LoadError: ArgumentError: Package ForwardDiff not found in current path.
+- Run `import Pkg; Pkg.add("ForwardDiff")` to install the ForwardDiff package.
+Stacktrace:
+  [1] macro expansion
+    @ ./loading.jl:2296 [inlined]
+  [2] macro expansion
+    @ ./lock.jl:273 [inlined]
+  [3] __require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2271
+  [4] #invoke_in_world#3
+    @ ./essentials.jl:1089 [inlined]
+  [5] invoke_in_world
+    @ ./essentials.jl:1086 [inlined]
+  [6] require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2260
+  [7] include(fname::String)
+    @ Main ./sysimg.jl:38
+  [8] top-level scope
+    @ /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/objective.jl:10
+  [9] include(fname::String)
+    @ Main ./sysimg.jl:38
+ [10] top-level scope
+    @ /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:27
+ [11] include(fname::String)
+    @ Main ./sysimg.jl:38
+ [12] top-level scope
+    @ none:6
+in expression starting at /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/ModelSetup.jl:7
+in expression starting at /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/objective.jl:9
+in expression starting at /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:27

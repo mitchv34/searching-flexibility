@@ -359,11 +359,21 @@ display "============================================================"
 * Compute moments by year
 preserve  // <-- This preserve is for the moments computation
 
-* Initialize results matrix (4 years x 23 moments)
-matrix results = J(4, 23, .)
+* Initialize results matrix (4 years x 25 moments)
+* (Added columns 24-25 for wage_alpha and wage_alpha_curvature)
+matrix results = J(4, 25, .)
 
-* Set column names
-matrix colnames results = mean_logwage var_logwage mean_alpha var_alpha mean_logwage_inperson mean_logwage_remote diff_logwage_inperson_remote inperson_share hybrid_share remote_share agg_productivity mean_logwage_RH_lowpsi mean_logwage_RH_highpsi diff_logwage_RH_high_lowpsi mean_alpha_highpsi mean_alpha_lowpsi diff_alpha_high_lowpsi diff_logwage_high_lowpsi var_logwage_highpsi var_logwage_lowpsi ratio_var_logwage_high_lowpsi market_tightness p90_p10_logwage
+* Set column names (renamed for clarity & direct alignment with Julia moments)
+* NOTE: diff_logwage_RH_high_lowpsi  -> wage_slope_psi (identifies ν via slope in RH subsample)
+*       diff_logwage_high_lowpsi    -> wage_premium_high_psi (identifies ψ₀ via high vs low ψ premium)
+matrix colnames results = ///
+    mean_logwage var_logwage mean_alpha var_alpha ///
+    mean_logwage_inperson mean_logwage_remote diff_logwage_inperson_remote ///
+    inperson_share hybrid_share remote_share agg_productivity ///
+    mean_logwage_RH_lowpsi mean_logwage_RH_highpsi wage_slope_psi ///
+    mean_alpha_highpsi mean_alpha_lowpsi diff_alpha_high_lowpsi wage_premium_high_psi ///
+    var_logwage_highpsi var_logwage_lowpsi ratio_var_logwage_high_lowpsi ///
+    market_tightness p90_p10_logwage wage_alpha wage_alpha_curvature
 
 matrix rownames results = "2022" "2023" "2024" "2025"
 
@@ -458,7 +468,7 @@ foreach yr of numlist 2022 2023 2024 2025 {
     }
 
     
-    * MOMENT FOR ψ₀: Wage Premium for High-ψ Firms (diff_logwage_high_lowpsi)
+    * MOMENT FOR ψ₀: Wage Premium for High-ψ Firms (wage_premium_high_psi)
     * SAMPLE RESTRICTION: Remote and hybrid workers only
     capture {
         * qui reg logwage high_psi experience experience_sq educ_* sex_* race_* ind_* occ_* ///
@@ -466,11 +476,11 @@ foreach yr of numlist 2022 2023 2024 2025 {
         qui reghdfe logwage high_psi experience experience_sq educ_* sex_* race_*  ///
             [pweight=wtfinl] if year == `yr' & (hybrid == 1 | full_remote == 1) & !missing(logwage, experience, high_psi), absorb(industry occupation)vce(cluster industry occupation)
         
-        * Get coefficient on high_psi (β₁) - this identifies ψ₀
-        matrix results[`row', 18] = _b[high_psi]
+    * Get coefficient on high_psi (β₁) - this identifies ψ₀ (stored as wage_premium_high_psi)
+    matrix results[`row', 18] = _b[high_psi]
     }
     
-    * MOMENT FOR ν: Slope of Wage-Efficiency Profile (diff_logwage_RH_high_lowpsi)
+    * MOMENT FOR ν: Slope of Wage-Efficiency Profile (wage_slope_psi)
     * SAMPLE RESTRICTION: Remote and hybrid workers only
     capture {
         * qui reg logwage psi experience experience_sq educ_* sex_* race_* ind_* occ_* ///
@@ -478,8 +488,8 @@ foreach yr of numlist 2022 2023 2024 2025 {
         qui reghdfe logwage psi experience experience_sq educ_* sex_* race_* ///
             [pweight=wtfinl] if year == `yr' & (hybrid == 1 | full_remote == 1) & !missing(logwage, experience, psi), absorb(industry occupation)vce(cluster industry occupation)
 
-        * Get coefficient on psi (β₁) - this identifies ν
-        matrix results[`row', 14] = _b[psi]
+    * Get coefficient on psi (β₁) - this identifies ν (stored as wage_slope_psi)
+    matrix results[`row', 14] = _b[psi]
     }
     
     * MOMENT FOR ϕ: Difference in Average Remote Share by Firm Type (diff_alpha_high_lowpsi)
@@ -545,16 +555,36 @@ foreach yr of numlist 2022 2023 2024 2025 {
     * Aggregate productivity (fixed values) - column 11
     matrix results[`row', 11] = `ap_`yr''
     
-    * 90/10 ratio of log wages - column 23
+    * 90/10 DIFFERENCE of log wages (p90 - p10) - column 23 (aligns with Julia code)
     qui sum logwage [weight=wtfinl] if year == `yr' & !missing(logwage), detail
     if r(N) > 0 {
         local p90_wage = r(p90)
         local p10_wage = r(p10)
-        if !missing(`p90_wage') & !missing(`p10_wage') & `p10_wage' != 0 {
-            local ratio_90_10 = `p90_wage' / `p10_wage'
-            matrix results[`row', 23] = `ratio_90_10'
+        if !missing(`p90_wage') & !missing(`p10_wage') {
+            local diff_90_10 = `p90_wage' - `p10_wage'
+            matrix results[`row', 23] = `diff_90_10'
         }
     }
+
+    *-------------------------------------------------------------------------------
+    * NEW REGRESSION: Wage ~ alpha + alpha^2 (adds curvature information for χ)
+    * Produces two NEW moments (do NOT overwrite existing c0 moment):
+    *   wage_alpha            -> coefficient on alpha (column 24)
+    *   wage_alpha_curvature  -> coefficient on alpha_sq (column 25)
+    *-------------------------------------------------------------------------------
+    capture drop alpha_sq
+    gen alpha_sq = alpha^2 if !missing(alpha)
+    capture noisily reghdfe logwage alpha alpha_sq experience experience_sq educ_* sex_* race_* ///
+        [pweight=wtfinl] if year == `yr' & !missing(logwage, alpha, experience), absorb(industry occupation) vce(cluster industry occupation)
+    if _rc == 0 & e(N)>0 {
+        capture confirm matrix e(b)
+        if !_rc {
+            * Store coefficients ONLY if they exist; else leave as missing
+            capture matrix results[`row', 24] = _b[alpha]
+            capture matrix results[`row', 25] = _b[alpha_sq]
+        }
+    }
+    drop alpha_sq
 }
 
 restore  // <-- This restore returns to the state before moments computation
@@ -687,9 +717,9 @@ foreach yr of local years {
         file write yaml "  mean_logwage_RH_highpsi: null" _n
     }
     
-    * For ν: Wage-efficiency slope
-    if !missing(diff_logwage_RH_high_lowpsi[`i']) {
-        file write yaml "  wage_slope_psi: " %9.6f (diff_logwage_RH_high_lowpsi[`i']) _n
+    * For ν: Wage-efficiency slope (wage_slope_psi)
+    if !missing(wage_slope_psi[`i']) {
+        file write yaml "  wage_slope_psi: " %9.6f (wage_slope_psi[`i']) _n
     }
     else {
         file write yaml "  wage_slope_psi: null" _n
@@ -718,9 +748,9 @@ foreach yr of local years {
         file write yaml "  diff_alpha_high_lowpsi: null" _n
     }
     
-    * For ψ₀: High-psi wage premium
-    if !missing(diff_logwage_high_lowpsi[`i']) {
-        file write yaml "  wage_premium_high_psi: " %9.6f (diff_logwage_high_lowpsi[`i']) _n
+    * For ψ₀: High-psi wage premium (wage_premium_high_psi)
+    if !missing(wage_premium_high_psi[`i']) {
+        file write yaml "  wage_premium_high_psi: " %9.6f (wage_premium_high_psi[`i']) _n
     }
     else {
         file write yaml "  wage_premium_high_psi: null" _n
@@ -761,6 +791,22 @@ foreach yr of local years {
     }
     else {
         file write yaml "  p90_p10_logwage: null" _n
+    }
+
+    * NEW: Wage-alpha linear coefficient (identifies mean marginal tradeoff)
+    if !missing(wage_alpha[`i']) {
+        file write yaml "  wage_alpha: " %9.6f (wage_alpha[`i']) _n
+    }
+    else {
+        file write yaml "  wage_alpha: null" _n
+    }
+    
+    * NEW: Wage-alpha curvature coefficient (identifies χ)
+    if !missing(wage_alpha_curvature[`i']) {
+        file write yaml "  wage_alpha_curvature: " %9.6f (wage_alpha_curvature[`i']) _n
+    }
+    else {
+        file write yaml "  wage_alpha_curvature: null" _n
     }
     
     * Leave job finding rate as null for now

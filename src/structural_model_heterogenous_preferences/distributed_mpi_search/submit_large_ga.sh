@@ -34,9 +34,10 @@ echo "[INFO] SLURM_NTASKS=${SLURM_NTASKS:-unset} (single-task launch strategy)"
 # Recommended: disable precompile storms on workers
 export JULIA_PKG_PRECOMPILE_AUTO=0
 export JULIA_NUM_THREADS=1   # Each worker single-threaded; master will spawn up to (CPUs-1) workers
-export INCREMENTAL_WORKERS=1  # Enable incremental spawn diagnostics
+export INCREMENTAL_WORKERS=0  # Disable incremental spawn - use bulk addition for production
 
-echo "[INFO] Forcing JIT mode (sysimage disabled per request)."
+echo "[INFO] Forcing JIT mode (sysimage disabled due to compatibility issues)."
+echo "[INFO] Sysimage at MPI_GridSearch_sysimage.so causes startup hangs and task scheduling errors."
 export DISABLE_CUSTOM_SYSIMAGE=1
 SYSIMAGE_FLAG=""
 

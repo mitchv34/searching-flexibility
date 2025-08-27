@@ -1,0 +1,59 @@
+Precompiling Revise...
+    757.8 ms  ✓ Requires
+    820.7 ms  ✓ OrderedCollections
+   1041.5 ms  ✓ CodeTracking
+   8566.4 ms  ✓ JuliaInterpreter
+   5980.7 ms  ✓ LoweredCodeUtils
+  10167.2 ms  ✓ Revise
+  6 dependencies successfully precompiled in 27 seconds. 13 already precompiled.
+Precompiling OhMyREPL...
+    849.9 ms  ✓ Preferences
+    617.7 ms  ✓ JLLWrappers
+    668.9 ms  ✓ fzf_jll
+   1224.5 ms  ✓ JLFzf
+   3239.0 ms  ✓ OhMyREPL
+  5 dependencies successfully precompiled in 7 seconds. 30 already precompiled.
+Precompiling YAML...
+    692.7 ms  ✓ Libiconv_jll
+    692.3 ms  ✓ StringEncodings
+   1394.7 ms  ✓ YAML
+  3 dependencies successfully precompiled in 3 seconds. 7 already precompiled.
+ERROR: LoadError: ParseError:
+# Error @ /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/modify_config_1.jl:18:59
+# Modify output directory to include array task ID
+config["Output"]["results_dir"] = "output/test_run/array_${array_id}"
+#                                                         └ ── identifier or parenthesized expression expected after $ in string
+Stacktrace:
+ [1] top-level scope
+   @ /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/modify_config_1.jl:18
+in expression starting at /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/modify_config_1.jl:18
+ERROR: LoadError: ArgumentError: Package ForwardDiff not found in current path.
+- Run `import Pkg; Pkg.add("ForwardDiff")` to install the ForwardDiff package.
+Stacktrace:
+  [1] macro expansion
+    @ ./loading.jl:2296 [inlined]
+  [2] macro expansion
+    @ ./lock.jl:273 [inlined]
+  [3] __require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2271
+  [4] #invoke_in_world#3
+    @ ./essentials.jl:1089 [inlined]
+  [5] invoke_in_world
+    @ ./essentials.jl:1086 [inlined]
+  [6] require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2260
+  [7] include(fname::String)
+    @ Main ./sysimg.jl:38
+  [8] top-level scope
+    @ /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/objective.jl:10
+  [9] include(fname::String)
+    @ Main ./sysimg.jl:38
+ [10] top-level scope
+    @ /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:27
+ [11] include(fname::String)
+    @ Main ./sysimg.jl:38
+ [12] top-level scope
+    @ none:6
+in expression starting at /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/ModelSetup.jl:7
+in expression starting at /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/objective.jl:9
+in expression starting at /project7/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/local_objective_search/run_search_production.jl:27

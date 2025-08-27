@@ -43,18 +43,21 @@ if haskey(ENV, "SLURM_NTASKS")
         # Single Slurm task but many CPUs -> spawn local workers to use cores
         println("Single-task allocation detected with $cpus_per_task CPUs; launching local workers.")
         desired_workers = max(cpus_per_task - 1, 1)  # leave 1 for master
-        exeflags = "--startup-file=no --project=/project/high_tech_ind/searching-flexibility"
+        
+        # Construct exeflags properly
+        local exeflags = ["--startup-file=no", "--project=/project/high_tech_ind/searching-flexibility"]
         if isfile(SYSIMAGE_PATH) && get(ENV, "DISABLE_CUSTOM_SYSIMAGE", "0") != "1"
-            exeflags *= " --sysimage=$(SYSIMAGE_PATH)"
+            push!(exeflags, "--sysimage=$(SYSIMAGE_PATH)")
         else
             println("⚠️  Sysimage disabled or missing -> JIT compile.")
         end
-        exeflags *= " -e 'ENV[\"JULIA_PKG_PRECOMPILE_AUTO\"]=\"0\"'"
-        println("[DEBUG] Worker exeflags: \n  $(exeflags)")
+        push!(exeflags, "-e", "ENV[\"JULIA_PKG_PRECOMPILE_AUTO\"]=\"0\"")
+        println("[DEBUG] Worker exeflags: \n  $(join(exeflags, " "))")
+        
         incremental = get(ENV, "INCREMENTAL_WORKERS", "1") == "1"
         if incremental
             println("[DEBUG] Incremental worker spawn enabled (desired=$desired_workers)")
-            failures = 0
+            local failures = 0
             for k in 1:desired_workers
                 try
                     addprocs(1; exeflags=exeflags)
@@ -87,13 +90,13 @@ if haskey(ENV, "SLURM_NTASKS")
     else
         println("Attempting to launch SlurmManager with SLURM_NTASKS=$requested_tasks ...")
         try
-            exeflags = "--startup-file=no --project=/project/high_tech_ind/searching-flexibility"
+            local exeflags = ["--startup-file=no", "--project=/project/high_tech_ind/searching-flexibility"]
             if isfile(SYSIMAGE_PATH) && get(ENV, "DISABLE_CUSTOM_SYSIMAGE", "0") != "1"
-                exeflags *= " --sysimage=$(SYSIMAGE_PATH)"
+                push!(exeflags, "--sysimage=$(SYSIMAGE_PATH)")
             else
                 println("⚠️  Sysimage disabled or missing -> JIT compile.")
             end
-            exeflags *= " -e 'ENV[\"JULIA_PKG_PRECOMPILE_AUTO\"]=\"0\"'"
+            push!(exeflags, "-e", "ENV[\"JULIA_PKG_PRECOMPILE_AUTO\"]=\"0\"")
             addprocs(SlurmManager(); exeflags=exeflags)
             sleep(2)
             println("✓ Workers added: $(nworkers()) (IDs: $(workers()))")
@@ -107,6 +110,11 @@ if haskey(ENV, "SLURM_NTASKS")
             println("❌ SlurmManager launch failed: $e")
             local_workers = max(requested_tasks - 1, 1)
             try
+                local exeflags = ["--startup-file=no", "--project=/project/high_tech_ind/searching-flexibility"]
+                if isfile(SYSIMAGE_PATH) && get(ENV, "DISABLE_CUSTOM_SYSIMAGE", "0") != "1"
+                    push!(exeflags, "--sysimage=$(SYSIMAGE_PATH)")
+                end
+                push!(exeflags, "-e", "ENV[\"JULIA_PKG_PRECOMPILE_AUTO\"]=\"0\"")
                 addprocs(local_workers; exeflags=exeflags)
                 println("✓ Fallback local workers added: $(nworkers())")
             catch e2
@@ -1357,6 +1365,9 @@ function run_ga_search(config::Dict)
         open(final_output_file, "w") do f; JSON3.pretty(f, final_results); end
         open(latest_output_file, "w") do f; JSON3.pretty(f, final_results); end
         println("GA final results saved: $final_output_file")
+        # NEW: export valid evaluation CSV
+        write_valid_objectives_csv(param_names, all_params, all_objectives, JOB_ID;
+                                   outdir=results_dir)
         # Append GA final summary to NDJSON history
         try
             history_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_history.ndjson")
@@ -1367,7 +1378,7 @@ function run_ga_search(config::Dict)
                 "completed_evaluations" => length(all_objectives),
                 "best_objective" => sanitize_nan_values(best_objective),
                 "ga_progress" => generations_completed / max(n_generations,1),
-                "elapsed_time_seconds" => elapsed_time,
+                "elapsed_time" => elapsed_time,
                 "evaluation_rate" => length(all_objectives)/max(elapsed_time,1e-9),
                 "best_params" => best_params_dict,
                 "final" => true,
@@ -1559,88 +1570,65 @@ function run_mpi_search(config::Dict)
         "best_objective" => sanitize_nan_values(best_objective),
         "best_moments" => sanitize_nan_values(best_moments),
         "parameter_names" => param_names,
-        "all_objectives" => sanitize_nan_values(objective_values),
-        "all_params" => parameter_vectors,  # Parameter vectors should be finite
-        "all_moments" => sanitize_nan_values(model_moments_list),  # Sanitize all moments
+        "all_objectives" => sanitize_nan_values(all_objectives),
+        "all_params" => all_params,
+        "all_moments" => sanitize_nan_values(all_moments),
         "elapsed_time" => elapsed_time,
         "n_workers" => nworkers(),
-        "n_evaluations" => length(objective_values),
-        "avg_time_per_eval" => elapsed_time/length(objective_values),
+        "n_evaluations" => length(all_objectives),
+        "avg_time_per_eval" => elapsed_time / max(1,length(all_objectives)),
+        "ga_generations_completed" => generations_completed,
+        "ga_total_generations" => n_generations,
+        "ga_progress_pct" => generations_completed / n_generations * 100,
+        "early_stopped" => early_stopped,
+        "early_stopping_reason" => early_stopping_reason,
+        "final_parameter_bounds" => Dict(param_names[i] => [lower_bounds[i], upper_bounds[i]] for i in 1:length(param_names)),
+        "auto_bound_expansion" => Dict(
+            "enabled" => auto_bound_enabled,
+            "expansion_counts" => Dict(param_names[i] => expansion_counts[i] for i in 1:length(param_names)),
+            "expansions_history" => expansions_history
+        ),
         "timestamp" => string(Dates.now()),
         "config_used" => config,
-        "intermediate" => false,
+        "algorithm" => "genetic_algorithm",
         "final_results" => true
     )
     
-    # Create a lightweight summary for quick access
-    latest_results = Dict(
-        "status" => "completed",
-        "job_id" => JOB_ID,
-        "best_params" => best_params_dict,
-        "best_params_vector" => best_params_vector,
-        "best_objective" => sanitize_nan_values(best_objective),
-        "best_moments" => sanitize_nan_values(best_moments),
-        "parameter_names" => param_names,
-        "elapsed_time" => elapsed_time,
-        "n_workers" => nworkers(),
-        "n_evaluations" => length(objective_values),
-        "avg_time_per_eval" => elapsed_time/length(objective_values),
-        "timestamp" => string(Dates.now()),
-        "search_summary" => Dict(
-            "total_evaluations" => length(objective_values),
-            "successful_evaluations" => length(filter(x -> isfinite(x) && x < 1e9, objective_values)),
-            "best_objective" => sanitize_nan_values(best_objective),
-            "objective_range" => begin
-                valid_objs = filter(x -> isfinite(x) && x < 1e9, objective_values)
-                if !isempty(valid_objs)
-                    Dict("min" => minimum(valid_objs), "max" => maximum(valid_objs))
-                else
-                    Dict("min" => NaN, "max" => NaN)
-                end
-            end
-        ),
-        "intermediate" => false,
-        "file_type" => "summary"
-    )
-    
-    # Save final results to results directory
-    results_dir = joinpath(MPI_SEARCH_DIR, "output", "results")
-    mkpath(results_dir)  # Create results directory if it doesn't exist
+    # Save final results
+    results_dir = joinpath(MPI_SEARCH_DIR, "output", "results"); mkpath(results_dir)
     final_output_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_final.json")
-    
+    latest_output_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_latest.json")
     try
-        # Save complete final results (large file with all data)
-        open(final_output_file, "w") do f
-            JSON3.pretty(f, final_results)
-        end
-        println("Final results (complete archive) saved to: $final_output_file")
-        
-        # Save lightweight summary results for quick access
-        latest_output_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_latest.json")
-        open(latest_output_file, "w") do f
-            JSON3.pretty(f, latest_results)
-        end
-        println("Latest results (quick summary) saved to: $latest_output_file")
-        # Append final summary (random search path) to NDJSON history
+        open(final_output_file, "w") do f; JSON3.pretty(f, final_results); end
+        open(latest_output_file, "w") do f; JSON3.pretty(f, final_results); end
+        println("GA final results saved: $final_output_file")
+        # NEW: export valid evaluation CSV
+        write_valid_objectives_csv(param_names, all_params, all_objectives, JOB_ID;
+                                   outdir=results_dir)
+        # Append GA final summary to NDJSON history
         try
             history_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_history.ndjson")
             summary = Dict(
                 "ts" => Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS"),
-                "completed_evaluations" => length(objective_values),
+                "generation" => generations_completed,
+                "total_generations" => n_generations,
+                "completed_evaluations" => length(all_objectives),
                 "best_objective" => sanitize_nan_values(best_objective),
-                "elapsed_time_seconds" => elapsed_time,
-                "evaluation_rate" => length(objective_values)/max(elapsed_time,1e-9),
+                "ga_progress" => generations_completed / max(n_generations,1),
+                "elapsed_time" => elapsed_time,
+                "evaluation_rate" => length(all_objectives)/max(elapsed_time,1e-9),
                 "best_params" => best_params_dict,
-                "final" => true
+                "final" => true,
+                "early_stopped" => early_stopped
             )
             open(history_file, "a") do f; JSON3.write(f, summary); write(f, '\n'); end
-            # Append to CSV (random search has no generation fields)
+            # Also append to CSV history
             try
                 csv_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_history.csv")
                 header_cols = ["ts","generation","total_generations","completed_evaluations","best_objective","ga_progress","elapsed_time_seconds","evaluation_rate"]
                 append!(header_cols, String.(param_names))
                 write_header = !isfile(csv_file)
-                row_vals = [summary["ts"], "", "", string(length(objective_values)), string(sanitize_nan_values(best_objective)), "", string(elapsed_time), string(length(objective_values)/max(elapsed_time,1e-9))]
+                row_vals = [summary["ts"], string(generations_completed), string(n_generations), string(length(all_objectives)), string(sanitize_nan_values(best_objective)), string(generations_completed / max(n_generations,1)), string(elapsed_time), string(length(all_objectives)/max(elapsed_time,1e-9))]
                 for pname in param_names
                     push!(row_vals, string(best_params_dict[pname]))
                 end
@@ -1651,22 +1639,755 @@ function run_mpi_search(config::Dict)
                     write(f, join(row_vals, ",") * "\n")
                 end
             catch e2
-                println("⚠️  Failed to append random-search final CSV row: $e2")
+                println("⚠️  Failed to append GA final CSV row: $e2")
             end
         catch e
-            println("⚠️  Failed to append final summary (random path) to history: $e")
+            println("⚠️  Failed to append GA final summary to history: $e")
         end
-        
     catch e
-        println("❌ Failed to save results: $e")
+        println("❌ Failed to save GA results: $e")
+    end
+
+    return final_results
+end
+
+function run_mpi_search(config::Dict)
+    """
+    Main distributed search function using validated configuration
+    """
+    println("\n🔍 Starting parameter search...")
+
+    # Determine algorithm (currently only Sobol/random sampling path implemented)
+    algorithm = begin
+        if haskey(config, "MPISearchConfig")
+            get(config["MPISearchConfig"], "algorithm", "random_search")
+        elseif haskey(config, "optimization")
+            get(config["optimization"], "algorithm", "random_search")
+        else
+            "random_search"
+        end
+    end
+    if algorithm == "genetic_algorithm"
+        return run_ga_search(config)
+    elseif algorithm == "bayesian_optimization"
+        println("⚠️  algorithm=bayesian_optimization specified, but BO loop not implemented. Falling back to Sobol sampling.")
+    else
+        println("Algorithm: $algorithm (Sobol sampling path)")
     end
     
-    # Clean up intermediate snapshots, keeping only the latest one
-    cleanup_intermediate_snapshots()
-    # Final archival cleanup of stale files from previous jobs now that new final exists
-    cleanup_old_results()
+    # (Disabled initial cleanup to preserve previous run results for concurrent analysis)
+    # cleanup_old_results()
     
+    # Get number of samples from config and ensure it's an integer
+    if haskey(config, "optimization")
+        n_samples = Int(get(config["optimization"], "max_evaluations", 10000))
+    elseif haskey(config, "MPISearchConfig")
+        n_samples = Int(get(config["MPISearchConfig"], "n_samples", 10000))
+    else
+        n_samples = 10000
+        println("⚠️  Using default n_samples = $n_samples")
+    end
+    
+    # Generate parameter samples using validated bounds
+    parameter_vectors, param_names = generate_parameter_grid(config, n_samples)
+    
+    println("Generated $(length(parameter_vectors)) parameter vectors")
+    println("Parameters: $(param_names)")
+    println("Number of workers: $(nworkers())")
+    
+    # Distribute evaluation across all workers with progress tracking
+    start_time = time()
+    
+    println("🚀 Distributing evaluations across MPI workers...")
+    println("📊 Progress will be tracked and intermediate results saved...")
+    
+    # Enhanced evaluation with progress tracking
+    objective_values = Vector{Float64}(undef, length(parameter_vectors))
+    model_moments_list = Vector{Dict}(undef, length(parameter_vectors))
+    
+    # Process in batches for progress reporting
+    batch_size = max(1, div(length(parameter_vectors), 20))  # 20 progress updates
+    
+    for batch_start in 1:batch_size:length(parameter_vectors)
+        batch_end = min(batch_start + batch_size - 1, length(parameter_vectors))
+        batch_params = parameter_vectors[batch_start:batch_end]
+        
+        # Evaluate batch - now returns tuples of (objective, moments)
+        batch_results = pmap(params -> evaluate_parameter_vector(params, param_names), batch_params)
+        
+        # Separate objectives and moments
+        for (i, (obj, moments)) in enumerate(batch_results)
+            idx = batch_start + i - 1
+            objective_values[idx] = obj
+            model_moments_list[idx] = moments
+        end
+        
+        # Progress reporting
+        completed = batch_end
+        progress_pct = round((completed / length(parameter_vectors)) * 100, digits=1)
+        elapsed = time() - start_time
+        avg_time = elapsed / completed
+        eta_seconds = avg_time * (length(parameter_vectors) - completed)
+        eta_minutes = round(eta_seconds / 60, digits=1)
+        
+        # Find current best
+        current_best_idx = argmin(objective_values[1:completed])
+        current_best_obj = objective_values[current_best_idx]
+        
+        println("Progress: $(progress_pct)% ($(completed)/$(length(parameter_vectors))) | " *
+                "Best: $(round(current_best_obj, digits=6)) | " *
+                "ETA: $(eta_minutes) min | " *
+                "Rate: $(round(1/avg_time, digits=2)) evals/sec")
+        
+        # Save intermediate results every 5% progress or every 100 evaluations
+        if completed % max(100, div(length(parameter_vectors), 20)) == 0 && completed < length(parameter_vectors)
+            save_intermediate_results(parameter_vectors[1:completed], 
+                                     objective_values[1:completed], 
+                                     model_moments_list[1:completed],
+                                     param_names, completed, start_time)
+        end
+    end
+    
+    elapsed_time = time() - start_time
+    
+    println("Completed $(length(objective_values)) evaluations in $(round(elapsed_time, digits=2)) seconds")
+    println("Average time per evaluation: $(round(elapsed_time/length(objective_values), digits=4)) seconds")
+    
+    # Find best parameters, filtering out NaN values
+    valid_indices = findall(x -> !isnan(x) && isfinite(x), objective_values)
+    
+    if isempty(valid_indices)
+        println("❌ All objective values are NaN or infinite! Check parameter bounds and model.")
+        # Use first evaluation as fallback, replacing NaN with large value
+        best_idx = 1
+        best_params_vector = parameter_vectors[1]
+        best_objective = isnan(objective_values[1]) ? 1e10 : objective_values[1]
+        best_moments = model_moments_list[1]
+        
+        # Replace any NaN moments with zeros
+        if haskey(best_moments, "model_moments") && any(isnan, values(best_moments["model_moments"]))
+            best_moments["model_moments"] = Dict(k => isnan(v) ? 0.0 : v for (k,v) in best_moments["model_moments"])
+        end
+    else
+        valid_objectives = objective_values[valid_indices]
+        local_best_idx = argmin(valid_objectives)
+        best_idx = valid_indices[local_best_idx]
+        best_params_vector = parameter_vectors[best_idx]
+        best_objective = objective_values[best_idx]
+        best_moments = model_moments_list[best_idx]
+        
+        println("✓ Found $(length(valid_indices)) valid evaluations out of $(length(objective_values))")
+    end
+    
+    # Convert best parameters to named dict
+    best_params_dict = Dict(zip(param_names, best_params_vector))
+    
+    println("\nSEARCH RESULTS:")
+    println("Best objective value: $best_objective")
+    println("Best parameters:")
+    for (name, value) in best_params_dict
+        println("  $name: $(round(value, digits=6))")
+    end
+    
+    println("Best model moments:")
+    for (name, value) in best_moments
+        if isfinite(value)
+            println("  $name: $(round(value, digits=6))")
+        else
+            println("  $name: $value")
+        end
+    end
+    
+    # Save final results - sanitize all NaN values for JSON compatibility
+    final_results = Dict(
+        "status" => "completed",
+        "job_id" => JOB_ID,
+        "best_params" => best_params_dict,
+        "best_params_vector" => best_params_vector,
+        "best_objective" => sanitize_nan_values(best_objective),
+        "best_moments" => sanitize_nan_values(best_moments),
+        "parameter_names" => param_names,
+        "all_objectives" => sanitize_nan_values(all_objectives),
+        "all_params" => all_params,
+        "all_moments" => sanitize_nan_values(all_moments),
+        "elapsed_time" => elapsed_time,
+        "n_workers" => nworkers(),
+        "n_evaluations" => length(all_objectives),
+        "avg_time_per_eval" => elapsed_time / max(1,length(all_objectives)),
+        "ga_generations_completed" => generations_completed,
+        "ga_total_generations" => n_generations,
+        "ga_progress_pct" => generations_completed / n_generations * 100,
+        "early_stopped" => early_stopped,
+        "early_stopping_reason" => early_stopping_reason,
+        "final_parameter_bounds" => Dict(param_names[i] => [lower_bounds[i], upper_bounds[i]] for i in 1:length(param_names)),
+        "auto_bound_expansion" => Dict(
+            "enabled" => auto_bound_enabled,
+            "expansion_counts" => Dict(param_names[i] => expansion_counts[i] for i in 1:length(param_names)),
+            "expansions_history" => expansions_history
+        ),
+        "timestamp" => string(Dates.now()),
+        "config_used" => config,
+        "algorithm" => "genetic_algorithm",
+        "final_results" => true
+    )
+
+    # Save final results
+    results_dir = joinpath(MPI_SEARCH_DIR, "output", "results"); mkpath(results_dir)
+    final_output_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_final.json")
+    latest_output_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_latest.json")
+    try
+        open(final_output_file, "w") do f; JSON3.pretty(f, final_results); end
+        open(latest_output_file, "w") do f; JSON3.pretty(f, final_results); end
+        println("GA final results saved: $final_output_file")
+        # NEW: export valid evaluation CSV
+        write_valid_objectives_csv(param_names, all_params, all_objectives, JOB_ID;
+                                   outdir=results_dir)
+        # Append GA final summary to NDJSON history
+        try
+            history_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_history.ndjson")
+            summary = Dict(
+                "ts" => Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS"),
+                "generation" => generations_completed,
+                "total_generations" => n_generations,
+                "completed_evaluations" => length(all_objectives),
+                "best_objective" => sanitize_nan_values(best_objective),
+                "ga_progress" => generations_completed / max(n_generations,1),
+                "elapsed_time" => elapsed_time,
+                "evaluation_rate" => length(all_objectives)/max(elapsed_time,1e-9),
+                "best_params" => best_params_dict,
+                "final" => true,
+                "early_stopped" => early_stopped
+            )
+            open(history_file, "a") do f; JSON3.write(f, summary); write(f, '\n'); end
+            # Also append to CSV history
+            try
+                csv_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_history.csv")
+                header_cols = ["ts","generation","total_generations","completed_evaluations","best_objective","ga_progress","elapsed_time_seconds","evaluation_rate"]
+                append!(header_cols, String.(param_names))
+                write_header = !isfile(csv_file)
+                row_vals = [summary["ts"], string(generations_completed), string(n_generations), string(length(all_objectives)), string(sanitize_nan_values(best_objective)), string(generations_completed / max(n_generations,1)), string(elapsed_time), string(length(all_objectives)/max(elapsed_time,1e-9))]
+                for pname in param_names
+                    push!(row_vals, string(best_params_dict[pname]))
+                end
+                open(csv_file, write_header ? "w" : "a") do f
+                    if write_header
+                        write(f, join(header_cols, ",") * "\n")
+                    end
+                    write(f, join(row_vals, ",") * "\n")
+                end
+            catch e2
+                println("⚠️  Failed to append GA final CSV row: $e2")
+            end
+        catch e
+            println("⚠️  Failed to append GA final summary to history: $e")
+        end
+    catch e
+        println("❌ Failed to save GA results: $e")
+    end
+
     return final_results
+end
+
+function run_mpi_search(config::Dict)
+    """
+    Main distributed search function using validated configuration
+    """
+    println("\n🔍 Starting parameter search...")
+
+    # Determine algorithm (currently only Sobol/random sampling path implemented)
+    algorithm = begin
+        if haskey(config, "MPISearchConfig")
+            get(config["MPISearchConfig"], "algorithm", "random_search")
+        elseif haskey(config, "optimization")
+            get(config["optimization"], "algorithm", "random_search")
+        else
+            "random_search"
+        end
+    end
+    if algorithm == "genetic_algorithm"
+        return run_ga_search(config)
+    elseif algorithm == "bayesian_optimization"
+        println("⚠️  algorithm=bayesian_optimization specified, but BO loop not implemented. Falling back to Sobol sampling.")
+    else
+        println("Algorithm: $algorithm (Sobol sampling path)")
+    end
+    
+    # (Disabled initial cleanup to preserve previous run results for concurrent analysis)
+    # cleanup_old_results()
+    
+    # Get number of samples from config and ensure it's an integer
+    if haskey(config, "optimization")
+        n_samples = Int(get(config["optimization"], "max_evaluations", 10000))
+    elseif haskey(config, "MPISearchConfig")
+        n_samples = Int(get(config["MPISearchConfig"], "n_samples", 10000))
+    else
+        n_samples = 10000
+        println("⚠️  Using default n_samples = $n_samples")
+    end
+    
+    # Generate parameter samples using validated bounds
+    parameter_vectors, param_names = generate_parameter_grid(config, n_samples)
+    
+    println("Generated $(length(parameter_vectors)) parameter vectors")
+    println("Parameters: $(param_names)")
+    println("Number of workers: $(nworkers())")
+    
+    # Distribute evaluation across all workers with progress tracking
+    start_time = time()
+    
+    println("🚀 Distributing evaluations across MPI workers...")
+    println("📊 Progress will be tracked and intermediate results saved...")
+    
+    # Enhanced evaluation with progress tracking
+    objective_values = Vector{Float64}(undef, length(parameter_vectors))
+    model_moments_list = Vector{Dict}(undef, length(parameter_vectors))
+    
+    # Process in batches for progress reporting
+    batch_size = max(1, div(length(parameter_vectors), 20))  # 20 progress updates
+    
+    for batch_start in 1:batch_size:length(parameter_vectors)
+        batch_end = min(batch_start + batch_size - 1, length(parameter_vectors))
+        batch_params = parameter_vectors[batch_start:batch_end]
+        
+        # Evaluate batch - now returns tuples of (objective, moments)
+        batch_results = pmap(params -> evaluate_parameter_vector(params, param_names), batch_params)
+        
+        # Separate objectives and moments
+        for (i, (obj, moments)) in enumerate(batch_results)
+            idx = batch_start + i - 1
+            objective_values[idx] = obj
+            model_moments_list[idx] = moments
+        end
+        
+        # Progress reporting
+        completed = batch_end
+        progress_pct = round((completed / length(parameter_vectors)) * 100, digits=1)
+        elapsed = time() - start_time
+        avg_time = elapsed / completed
+        eta_seconds = avg_time * (length(parameter_vectors) - completed)
+        eta_minutes = round(eta_seconds / 60, digits=1)
+        
+        # Find current best
+        current_best_idx = argmin(objective_values[1:completed])
+        current_best_obj = objective_values[current_best_idx]
+        
+        println("Progress: $(progress_pct)% ($(completed)/$(length(parameter_vectors))) | " *
+                "Best: $(round(current_best_obj, digits=6)) | " *
+                "ETA: $(eta_minutes) min | " *
+                "Rate: $(round(1/avg_time, digits=2)) evals/sec")
+        
+        # Save intermediate results every 5% progress or every 100 evaluations
+        if completed % max(100, div(length(parameter_vectors), 20)) == 0 && completed < length(parameter_vectors)
+            save_intermediate_results(parameter_vectors[1:completed], 
+                                     objective_values[1:completed], 
+                                     model_moments_list[1:completed],
+                                     param_names, completed, start_time)
+        end
+    end
+    
+    elapsed_time = time() - start_time
+    
+    println("Completed $(length(objective_values)) evaluations in $(round(elapsed_time, digits=2)) seconds")
+    println("Average time per evaluation: $(round(elapsed_time/length(objective_values), digits=4)) seconds")
+    
+    # Find best parameters, filtering out NaN values
+    valid_indices = findall(x -> !isnan(x) && isfinite(x), objective_values)
+    
+    if isempty(valid_indices)
+        println("❌ All objective values are NaN or infinite! Check parameter bounds and model.")
+        # Use first evaluation as fallback, replacing NaN with large value
+        best_idx = 1
+        best_params_vector = parameter_vectors[1]
+        best_objective = isnan(objective_values[1]) ? 1e10 : objective_values[1]
+        best_moments = model_moments_list[1]
+        
+        # Replace any NaN moments with zeros
+        if haskey(best_moments, "model_moments") && any(isnan, values(best_moments["model_moments"]))
+            best_moments["model_moments"] = Dict(k => isnan(v) ? 0.0 : v for (k,v) in best_moments["model_moments"])
+        end
+    else
+        valid_objectives = objective_values[valid_indices]
+        local_best_idx = argmin(valid_objectives)
+        best_idx = valid_indices[local_best_idx]
+        best_params_vector = parameter_vectors[best_idx]
+        best_objective = objective_values[best_idx]
+        best_moments = model_moments_list[best_idx]
+        
+        println("✓ Found $(length(valid_indices)) valid evaluations out of $(length(objective_values))")
+    end
+    
+    # Convert best parameters to named dict
+    best_params_dict = Dict(zip(param_names, best_params_vector))
+    
+    println("\nSEARCH RESULTS:")
+    println("Best objective value: $best_objective")
+    println("Best parameters:")
+    for (name, value) in best_params_dict
+        println("  $name: $(round(value, digits=6))")
+    end
+    
+    println("Best model moments:")
+    for (name, value) in best_moments
+        if isfinite(value)
+            println("  $name: $(round(value, digits=6))")
+        else
+            println("  $name: $value")
+        end
+    end
+    
+    # Save final results - sanitize all NaN values for JSON compatibility
+    final_results = Dict(
+        "status" => "completed",
+        "job_id" => JOB_ID,
+        "best_params" => best_params_dict,
+        "best_params_vector" => best_params_vector,
+        "best_objective" => sanitize_nan_values(best_objective),
+        "best_moments" => sanitize_nan_values(best_moments),
+        "parameter_names" => param_names,
+        "all_objectives" => sanitize_nan_values(all_objectives),
+        "all_params" => all_params,
+        "all_moments" => sanitize_nan_values(all_moments),
+        "elapsed_time" => elapsed_time,
+        "n_workers" => nworkers(),
+        "n_evaluations" => length(all_objectives),
+        "avg_time_per_eval" => elapsed_time / max(1,length(all_objectives)),
+        "ga_generations_completed" => generations_completed,
+        "ga_total_generations" => n_generations,
+        "ga_progress_pct" => generations_completed / n_generations * 100,
+        "early_stopped" => early_stopped,
+        "early_stopping_reason" => early_stopping_reason,
+        "final_parameter_bounds" => Dict(param_names[i] => [lower_bounds[i], upper_bounds[i]] for i in 1:length(param_names)),
+        "auto_bound_expansion" => Dict(
+            "enabled" => auto_bound_enabled,
+            "expansion_counts" => Dict(param_names[i] => expansion_counts[i] for i in 1:length(param_names)),
+            "expansions_history" => expansions_history
+        ),
+        "timestamp" => string(Dates.now()),
+        "config_used" => config,
+        "algorithm" => "genetic_algorithm",
+        "final_results" => true
+    )
+
+    # Save final results
+    results_dir = joinpath(MPI_SEARCH_DIR, "output", "results"); mkpath(results_dir)
+    final_output_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_final.json")
+    latest_output_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_latest.json")
+    try
+        open(final_output_file, "w") do f; JSON3.pretty(f, final_results); end
+        open(latest_output_file, "w") do f; JSON3.pretty(f, final_results); end
+        println("GA final results saved: $final_output_file")
+        # NEW: export valid evaluation CSV
+        write_valid_objectives_csv(param_names, all_params, all_objectives, JOB_ID;
+                                   outdir=results_dir)
+        # Append GA final summary to NDJSON history
+        try
+            history_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_history.ndjson")
+            summary = Dict(
+                "ts" => Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS"),
+                "generation" => generations_completed,
+                "total_generations" => n_generations,
+                "completed_evaluations" => length(all_objectives),
+                "best_objective" => sanitize_nan_values(best_objective),
+                "ga_progress" => generations_completed / max(n_generations,1),
+                "elapsed_time" => elapsed_time,
+                "evaluation_rate" => length(all_objectives)/max(elapsed_time,1e-9),
+                "best_params" => best_params_dict,
+                "final" => true,
+                "early_stopped" => early_stopped
+            )
+            open(history_file, "a") do f; JSON3.write(f, summary); write(f, '\n'); end
+            # Also append to CSV history
+            try
+                csv_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_history.csv")
+                header_cols = ["ts","generation","total_generations","completed_evaluations","best_objective","ga_progress","elapsed_time_seconds","evaluation_rate"]
+                append!(header_cols, String.(param_names))
+                write_header = !isfile(csv_file)
+                row_vals = [summary["ts"], string(generations_completed), string(n_generations), string(length(all_objectives)), string(sanitize_nan_values(best_objective)), string(generations_completed / max(n_generations,1)), string(elapsed_time), string(length(all_objectives)/max(elapsed_time,1e-9))]
+                for pname in param_names
+                    push!(row_vals, string(best_params_dict[pname]))
+                end
+                open(csv_file, write_header ? "w" : "a") do f
+                    if write_header
+                        write(f, join(header_cols, ",") * "\n")
+                    end
+                    write(f, join(row_vals, ",") * "\n")
+                end
+            catch e2
+                println("⚠️  Failed to append GA final CSV row: $e2")
+            end
+        catch e
+            println("⚠️  Failed to append GA final summary to history: $e")
+        end
+    catch e
+        println("❌ Failed to save GA results: $e")
+    end
+
+    return final_results
+end
+
+function run_mpi_search(config::Dict)
+    """
+    Main distributed search function using validated configuration
+    """
+    println("\n🔍 Starting parameter search...")
+
+    # Determine algorithm (currently only Sobol/random sampling path implemented)
+    algorithm = begin
+        if haskey(config, "MPISearchConfig")
+            get(config["MPISearchConfig"], "algorithm", "random_search")
+        elseif haskey(config, "optimization")
+            get(config["optimization"], "algorithm", "random_search")
+        else
+            "random_search"
+        end
+    end
+    if algorithm == "genetic_algorithm"
+        return run_ga_search(config)
+    elseif algorithm == "bayesian_optimization"
+        println("⚠️  algorithm=bayesian_optimization specified, but BO loop not implemented. Falling back to Sobol sampling.")
+    else
+        println("Algorithm: $algorithm (Sobol sampling path)")
+    end
+    
+    # (Disabled initial cleanup to preserve previous run results for concurrent analysis)
+    # cleanup_old_results()
+    
+    # Get number of samples from config and ensure it's an integer
+    if haskey(config, "optimization")
+        n_samples = Int(get(config["optimization"], "max_evaluations", 10000))
+    elseif haskey(config, "MPISearchConfig")
+        n_samples = Int(get(config["MPISearchConfig"], "n_samples", 10000))
+    else
+        n_samples = 10000
+        println("⚠️  Using default n_samples = $n_samples")
+    end
+    
+    # Generate parameter samples using validated bounds
+    parameter_vectors, param_names = generate_parameter_grid(config, n_samples)
+    
+    println("Generated $(length(parameter_vectors)) parameter vectors")
+    println("Parameters: $(param_names)")
+    println("Number of workers: $(nworkers())")
+    
+    # Distribute evaluation across all workers with progress tracking
+    start_time = time()
+    
+    println("🚀 Distributing evaluations across MPI workers...")
+    println("📊 Progress will be tracked and intermediate results saved...")
+    
+    # Enhanced evaluation with progress tracking
+    objective_values = Vector{Float64}(undef, length(parameter_vectors))
+    model_moments_list = Vector{Dict}(undef, length(parameter_vectors))
+    
+    # Process in batches for progress reporting
+    batch_size = max(1, div(length(parameter_vectors), 20))  # 20 progress updates
+    
+    for batch_start in 1:batch_size:length(parameter_vectors)
+        batch_end = min(batch_start + batch_size - 1, length(parameter_vectors))
+        batch_params = parameter_vectors[batch_start:batch_end]
+        
+        # Evaluate batch - now returns tuples of (objective, moments)
+        batch_results = pmap(params -> evaluate_parameter_vector(params, param_names), batch_params)
+        
+        # Separate objectives and moments
+        for (i, (obj, moments)) in enumerate(batch_results)
+            idx = batch_start + i - 1
+            objective_values[idx] = obj
+            model_moments_list[idx] = moments
+        end
+        
+        # Progress reporting
+        completed = batch_end
+        progress_pct = round((completed / length(parameter_vectors)) * 100, digits=1)
+        elapsed = time() - start_time
+        avg_time = elapsed / completed
+        eta_seconds = avg_time * (length(parameter_vectors) - completed)
+        eta_minutes = round(eta_seconds / 60, digits=1)
+        
+        # Find current best
+        current_best_idx = argmin(objective_values[1:completed])
+        current_best_obj = objective_values[current_best_idx]
+        
+        println("Progress: $(progress_pct)% ($(completed)/$(length(parameter_vectors))) | " *
+                "Best: $(round(current_best_obj, digits=6)) | " *
+                "ETA: $(eta_minutes) min | " *
+                "Rate: $(round(1/avg_time, digits=2)) evals/sec")
+        
+        # Save intermediate results every 5% progress or every 100 evaluations
+        if completed % max(100, div(length(parameter_vectors), 20)) == 0 && completed < length(parameter_vectors)
+            save_intermediate_results(parameter_vectors[1:completed], 
+                                     objective_values[1:completed], 
+                                     model_moments_list[1:completed],
+                                     param_names, completed, start_time)
+        end
+    end
+    
+    elapsed_time = time() - start_time
+    
+    println("Completed $(length(objective_values)) evaluations in $(round(elapsed_time, digits=2)) seconds")
+    println("Average time per evaluation: $(round(elapsed_time/length(objective_values), digits=4)) seconds")
+    
+    # Find best parameters, filtering out NaN values
+    valid_indices = findall(x -> !isnan(x) && isfinite(x), objective_values)
+    
+    if isempty(valid_indices)
+        println("❌ All objective values are NaN or infinite! Check parameter bounds and model.")
+        # Use first evaluation as fallback, replacing NaN with large value
+        best_idx = 1
+        best_params_vector = parameter_vectors[1]
+        best_objective = isnan(objective_values[1]) ? 1e10 : objective_values[1]
+        best_moments = model_moments_list[1]
+        
+        # Replace any NaN moments with zeros
+        if haskey(best_moments, "model_moments") && any(isnan, values(best_moments["model_moments"]))
+            best_moments["model_moments"] = Dict(k => isnan(v) ? 0.0 : v for (k,v) in best_moments["model_moments"])
+        end
+    else
+        valid_objectives = objective_values[valid_indices]
+        local_best_idx = argmin(valid_objectives)
+        best_idx = valid_indices[local_best_idx]
+        best_params_vector = parameter_vectors[best_idx]
+        best_objective = objective_values[best_idx]
+        best_moments = model_moments_list[best_idx]
+        
+        println("✓ Found $(length(valid_indices)) valid evaluations out of $(length(objective_values))")
+    end
+    
+    # Convert best parameters to named dict
+    best_params_dict = Dict(zip(param_names, best_params_vector))
+    
+    println("\nSEARCH RESULTS:")
+    println("Best objective value: $best_objective")
+    println("Best parameters:")
+    for (name, value) in best_params_dict
+        println("  $name: $(round(value, digits=6))")
+    end
+    
+    println("Best model moments:")
+    for (name, value) in best_moments
+        if isfinite(value)
+            println("  $name: $(round(value, digits=6))")
+        else
+            println("  $name: $value")
+        end
+    end
+    
+    # Save final results - sanitize all NaN values for JSON compatibility
+    final_results = Dict(
+        "status" => "completed",
+        "job_id" => JOB_ID,
+        "best_params" => best_params_dict,
+        "best_params_vector" => best_params_vector,
+        "best_objective" => sanitize_nan_values(best_objective),
+        "best_moments" => sanitize_nan_values(best_moments),
+        "parameter_names" => param_names,
+        "all_objectives" => sanitize_nan_values(all_objectives),
+        "all_params" => all_params,
+        "all_moments" => sanitize_nan_values(all_moments),
+        "elapsed_time" => elapsed_time,
+        "n_workers" => nworkers(),
+        "n_evaluations" => length(all_objectives),
+        "avg_time_per_eval" => elapsed_time / max(1,length(all_objectives)),
+        "ga_generations_completed" => generations_completed,
+        "ga_total_generations" => n_generations,
+        "ga_progress_pct" => generations_completed / n_generations * 100,
+        "early_stopped" => early_stopped,
+        "early_stopping_reason" => early_stopping_reason,
+        "final_parameter_bounds" => Dict(param_names[i] => [lower_bounds[i], upper_bounds[i]] for i in 1:length(param_names)),
+        "auto_bound_expansion" => Dict(
+            "enabled" => auto_bound_enabled,
+            "expansion_counts" => Dict(param_names[i] => expansion_counts[i] for i in 1:length(param_names)),
+            "expansions_history" => expansions_history
+        ),
+        "timestamp" => string(Dates.now()),
+        "config_used" => config,
+        "algorithm" => "genetic_algorithm",
+        "final_results" => true
+    )
+
+    # Save final results
+    results_dir = joinpath(MPI_SEARCH_DIR, "output", "results"); mkpath(results_dir)
+    final_output_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_final.json")
+    latest_output_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_latest.json")
+    try
+        open(final_output_file, "w") do f; JSON3.pretty(f, final_results); end
+        open(latest_output_file, "w") do f; JSON3.pretty(f, final_results); end
+        println("GA final results saved: $final_output_file")
+        # NEW: export valid evaluation CSV
+        write_valid_objectives_csv(param_names, all_params, all_objectives, JOB_ID;
+                                   outdir=results_dir)
+        # Append GA final summary to NDJSON history
+        try
+            history_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_history.ndjson")
+            summary = Dict(
+                "ts" => Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS"),
+                "generation" => generations_completed,
+                "total_generations" => n_generations,
+                "completed_evaluations" => length(all_objectives),
+                "best_objective" => sanitize_nan_values(best_objective),
+                "ga_progress" => generations_completed / max(n_generations,1),
+                "elapsed_time" => elapsed_time,
+                "evaluation_rate" => length(all_objectives)/max(elapsed_time,1e-9),
+                "best_params" => best_params_dict,
+                "final" => true,
+                "early_stopped" => early_stopped
+            )
+            open(history_file, "a") do f; JSON3.write(f, summary); write(f, '\n'); end
+            # Also append to CSV history
+            try
+                csv_file = joinpath(results_dir, "mpi_search_results_job$(JOB_ID)_history.csv")
+                header_cols = ["ts","generation","total_generations","completed_evaluations","best_objective","ga_progress","elapsed_time_seconds","evaluation_rate"]
+                append!(header_cols, String.(param_names))
+                write_header = !isfile(csv_file)
+                row_vals = [summary["ts"], string(generations_completed), string(n_generations), string(length(all_objectives)), string(sanitize_nan_values(best_objective)), string(generations_completed / max(n_generations,1)), string(elapsed_time), string(length(all_objectives)/max(elapsed_time,1e-9))]
+                for pname in param_names
+                    push!(row_vals, string(best_params_dict[pname]))
+                end
+                open(csv_file, write_header ? "w" : "a") do f
+                    if write_header
+                        write(f, join(header_cols, ",") * "\n")
+                    end
+                    write(f, join(row_vals, ",") * "\n")
+                end
+            catch e2
+                println("⚠️  Failed to append GA final CSV row: $e2")
+            end
+        catch e
+            println("⚠️  Failed to append GA final summary to history: $e")
+        end
+    catch e
+        println("❌ Failed to save GA results: $e")
+    end
+
+    return final_results
+end
+
+# --- Utility: export valid evaluations (objective + parameters) to CSV ---
+const VALID_OBJ_THRESHOLD = 1e9  # treat >= threshold as penalty/invalid
+
+function write_valid_objectives_csv(param_names::Vector, all_params::Vector{<:Vector},
+                                    all_objectives::Vector{<:Real}, job_id;
+                                    outdir::AbstractString="",
+                                    fname::AbstractString="mpi_search_results_job$(job_id)_valid_objectives.csv")
+    outdir == "" && (outdir = joinpath(@__DIR__, "output", "results"))
+    mkpath(outdir)
+    path = joinpath(outdir, fname)
+    open(path, "w") do io
+        # Header: objective, then parameter columns
+        write(io, join(vcat("objective", string.(param_names)), ",") * "\n")
+        @inbounds for (i, obj) in enumerate(all_objectives)
+            if isfinite(obj) && obj < VALID_OBJ_THRESHOLD
+                params = all_params[i]
+                write(io, string(obj))
+                for p in params
+                    write(io, ',', string(p))
+                end
+                write(io, '\n')
+            end
+        end
+    end
+    println("✓ Valid evaluations CSV written: $(basename(path))")
+    return path
 end
 
 # --- 9. Execute search ---

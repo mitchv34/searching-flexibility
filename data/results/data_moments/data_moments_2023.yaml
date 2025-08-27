@@ -1,27 +1,30 @@
 # Data moments for year 2023
-# Generated on: 23 Aug 2025
+# Generated on: 2025-08-26
 
 DataMoments:
-  mean_logwage:  3.115528
-  var_logwage:  0.488758
-  mean_alpha:  0.132094
-  var_alpha:  0.095101
-  mean_logwage_inperson:  3.010212
-  mean_logwage_remote:  3.540344
-  diff_logwage_inperson_remote: -0.159238
-  inperson_share:  0.815030
-  hybrid_share:  0.101860
-  remote_share:  0.083109
-  agg_productivity:  1.117900
-  mean_logwage_RH_lowpsi:  3.483179
-  mean_logwage_RH_highpsi:  3.797808
-  wage_slope_psi:  0.109844
-  mean_alpha_highpsi:  0.393896
-  mean_alpha_lowpsi:  0.100903
-  diff_alpha_high_lowpsi:  0.292993
-  wage_premium_high_psi:  0.209500
-  var_logwage_highpsi:  0.564949
-  var_logwage_lowpsi:  0.440208
-  ratio_var_logwage_high_lowpsi:  1.283369
-  market_tightness:  1.400000
+  mean_logwage: 3.115528
+  var_logwage: 0.488754
+  p90_p10_logwage: 1.518873
+  mean_alpha: 0.132104
+  var_alpha: 0.095106
+  inperson_share: 0.836128
+  hybrid_share: 0.062283
+  remote_share: 0.101589
+  agg_productivity: 1.117900
+  diff_alpha_high_lowpsi: 0.273671
+  market_tightness: 1.400000
   job_finding_rate: null
+  diff_logwage_inperson_remote: -0.151173
+  wage_premium_high_psi: 0.021754
+  wage_slope_psi: 0.144840
+  wage_alpha: 0.693853
+  wage_alpha_curvature: -0.544004
+  mean_logwage_inperson: null
+  mean_logwage_remote: null
+  mean_logwage_RH_lowpsi: null
+  mean_logwage_RH_highpsi: null
+  mean_alpha_highpsi: 0.330788
+  mean_alpha_lowpsi: 0.057117
+  var_logwage_highpsi: null
+  var_logwage_lowpsi: null
+  ratio_var_logwage_high_lowpsi: null

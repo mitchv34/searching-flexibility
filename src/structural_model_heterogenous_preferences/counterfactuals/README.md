@@ -1,183 +1,228 @@
-# Counterfactual Analysis Documentation
+# Counterfactual Experiments
 
-This directory contains the implementation of counterfactual experiments for the searching flexibility model. The analysis decomposes changes between 2019 and 2024 into preference and technology components, and explores policy implications.
+This directory contains scripts for running counterfactual experiments with the structural model. Each experiment is designed to test specific economic hypotheses and policy scenarios.
 
-## Files Overview
+## Directory Structure
 
-### Main Scripts
-- `run_counterfactuals.jl` - Main entry point that orchestrates all experiments
-- `complementarity_analysis.jl` - Implements the complementarity grid experiment (CF 4)
-- `rto_analysis.jl` - Implements the return-to-office mandate experiment (CF 5)
-- `plotting_utils.jl` - Visualization functions for all experiments
-- `solver_extensions.jl` - Modified solver functions for constrained optimization
+```         
+counterfactuals/
+├── counterfactual_config.yaml           # Central configuration file
+├── run_all_experiments.jl               # Master runner script
+├── update_estimated_parameters.jl       # Utility to update baseline parameters
+├── experiment_1_no_remote_work.jl       # Experiment 1: No remote work technology
+├── experiment_2_remote_tech_levels.jl   # Experiment 2: Different tech levels
+├── experiment_3_remote_mandate.jl       # Experiment 3: Remote work mandates
+├── experiment_4_search_frictions.jl     # Experiment 4: Search friction variations
+├── experiment_5_unemployment_benefits.jl # Experiment 5: Unemployment benefit levels
+├── experiment_6_bargaining_power.jl     # Experiment 6: Worker bargaining power
+├── test_infrastructure.jl              # Infrastructure testing script
+└── results/                            # Output directory for results
+```
 
-### Experiments Implemented
+## Baseline Model: Estimated Parameters
 
-#### 1. Decomposition Experiments (CF 1-3)
-These experiments decompose the total change between 2019 and 2024 into components due to:
-- **Preferences**: Changes in worker preferences for remote work (c₀, χ, μ)
-- **Technology**: Changes in technology parameters (A₀, A₁, ψ₀, ν, ϕ)
+All counterfactual experiments use **estimated parameters from 2024 data** as the baseline "true" model. This ensures that counterfactuals reflect realistic policy changes from an empirically grounded starting point.
 
-**Outcomes analyzed:**
-- Mean remote work share E[α]
-- Aggregate productivity
-- Wage inequality Var(log w)
+### Baseline Configuration
+- **Parameter Source**: `data/results/estimated_parameters/estimated_parameters_2024.yaml`
+- **Estimation Method**: Method of moments with MPI distributed search + local refinement
+- **Data Year**: 2024
+- **Status**: Contains latest parameter estimates from optimization runs
 
-#### 2. Complementarity Analysis (CF 4)
-Explores how complementarity (ϕ) and technology (ν) parameters interact by:
-- Creating a grid around their 2024 estimated values
-- Re-calibrating κ₀ to maintain constant unemployment rate
-- Computing outcomes across the parameter space
+### Updating Estimated Parameters
 
-**Key insight**: Tests whether technology and complementarity are substitutes or complements in determining remote work adoption.
+When new parameter estimates become available, update the baseline using:
 
-#### 3. Return-to-Office Mandate (CF 5)
-Simulates policy interventions that cap maximum remote work at different levels:
-- Constrains α ≤ α_max for various α_max values
-- Measures impact on productivity and inequality
-- Provides welfare analysis of RTO policies
+```bash
+# Auto-update from latest optimization results
+julia update_estimated_parameters.jl --auto
+
+# Manual update from specific CSV file
+julia update_estimated_parameters.jl --csv output/best_parameters_20250827_140128.csv
+
+# With additional metadata
+julia update_estimated_parameters.jl --csv output/best_parameters_20250827_140128.csv \
+  --objective 0.00142 --notes "Final estimates after convergence"
+```
+
+## Experiments Overview
+
+### Experiment 1: No Remote Work Technology
+
+-   **Purpose**: Measures the impact of remote work technology by eliminating it
+-   **Parameters**: Sets $\psi_0 = 0$ and $\nu = 0$
+-   **Key Insights**: Baseline comparison to understand remote work importance
+
+### Experiment 2: Remote Work Technology Levels
+
+-   **Purpose**: Tests sensitivity to different remote work productivity levels
+-   **Parameters**: Sweeps over $\psi_0$ and $\nu$ values
+-   **Modes**: Can run as parallel (paired values) or grid (all combinations)
+-   **Key Insights**: Technology adoption and productivity effects
+
+### Experiment 3: Remote Work Mandate
+
+-   **Purpose**: Policy experiment with mandatory minimum remote work levels
+-   **Parameters**: Uses $\alpha_\text{mandated}$ constraint levels from 0% to 100%
+-   **Special**: Requires `solve_model_rto` function ==(to be implemented)==
+-   **Key Insights**: Policy compliance and economic distortions
+
+### Experiment 4: Search Friction Variations
+
+-   **Purpose**: Impact of different search market frictions
+-   **Parameters**: Varies $\kappa_0$ (vacancy costs) and $\kappa_1$ (elasticity)
+    -   Since $\kappa_1$ was calibrated not estimated then changing it may need careful thinking.
+-   **Key Insights**: Labor market efficiency and matching
+
+### Experiment 5: Unemployment Benefit Levels
+
+-   **Purpose**: Welfare policy impact on labor markets
+-   **Parameters**: Sweeps unemployment benefit $b$ levels
+-   **Key Insights**: Moral hazard vs insurance effects
+
+### Experiment 6: Worker Bargaining Power
+
+-   **Purpose**: Distribution of match surplus between workers and firms
+-   **Parameters**: Varies worker share $\xi$ from 10% to 90%
+-   **Key Insights**: Wage inequality and market tightness
+
+## Configuration
+
+All experiments are controlled through `counterfactual_config.yaml`. Key sections:
+
+-   **Base Model**: Points to main model parameters
+-   **Experiment Configs**: Individual experiment settings
+-   **Common Settings**: Solver options, output formats, parallel settings
+
+### Example Configuration Modification
+
+To test different remote work technology levels:
+
+``` yaml
+Experiment2_RemoteTechLevels:
+  parameter_sweeps:
+    psi_0: [0.5, 0.7, 0.9, 1.1]  # Modify these values
+    nu: [0.2, 0.3, 0.4, 0.5]     # Modify these values
+  sweep_mode: "parallel"          # or "grid"
+```
 
 ## Usage
 
-### Basic Usage
-```julia
-# Navigate to the counterfactuals directory
-cd("src/structural_model_heterogenous_preferences/counterfactuals")
+### Running Individual Experiments
 
+``` bash
+# Run specific experiment
+julia experiment_1_no_remote_work.jl
+
+# Run with custom config
+julia experiment_2_remote_tech_levels.jl custom_config.yaml
+```
+
+### Running Multiple Experiments
+
+``` bash
 # Run all experiments
-include("run_counterfactuals.jl")
+julia run_all_experiments.jl
+
+# Run specific experiments
+julia run_all_experiments.jl --experiments 1,2,3
+
+# Run with verbose output
+julia run_all_experiments.jl --experiments 2,4 --verbose
+
+# Use custom config
+julia run_all_experiments.jl --config my_config.yaml --experiments all
 ```
 
-### Customization
-You can modify the experiments by editing the main script:
+### Command Line Options
 
-```julia
-# Skip computationally intensive experiments
-run_advanced = false
+-   `--experiments, -e`: Which experiments to run (1,2,3,4,5,6 or "all")
+-   `--config, -c`: Path to configuration file (default: counterfactual_config.yaml)
+-   `--verbose, -v`: Verbose output for debugging
+-   `--parallel, -p`: Enable parallel processing (where supported)
 
-# Customize grid sizes for complementarity analysis
-complementarity_results = run_complementarity_experiment(
-    prim_2024, res_2024;
-    phi_grid_size=5,     # Increase for finer grid
-    nu_grid_size=5,
-    phi_range=0.2,       # Expand search range
-    nu_range=0.2
-)
+## Output
 
-# Customize RTO constraint levels
-rto_results = run_rto_experiment(
-    prim_2024, res_2024;
-    alpha_max_values=[0.2, 0.4, 0.6, 0.8, 0.9]
-)
-```
+Results are saved in the `results/` directory with timestamps:
 
-## Prerequisites
+-   **YAML files**: Complete detailed results with all metadata
+-   **CSV files**: Summary tables for analysis in R/Python/Excel
 
-### Required Files
-1. **Estimated Parameters**: 
-   - `output/estimation_results/params_2019.yaml`
-   - `output/estimation_results/params_2024.yaml`
+### Output Files
 
-2. **Model Files**:
-   - `src/structural_model_heterogenous_preferences/ModelSetup.jl`
-   - `src/structural_model_heterogenous_preferences/ModelSolver.jl`
-   - `src/structural_model_heterogenous_preferences/ModelEstimation.jl`
-
-### Required Functions
-The following functions must be available in your model files:
-
-```julia
-# Model initialization and solving
-initializeModel(config_path)
-update_params_and_resolve(prim, res; params_to_update)
-solve_model(prim; kwargs...)
-
-# Moment calculation
-compute_model_moments(prim, res)
-```
-
-### Expected Moment Structure
-The `compute_model_moments` function should return a dictionary/NamedTuple with:
-- `:mean_alpha` - Mean remote work share
-- `:agg_productivity` - Aggregate productivity measure
-- `:var_logwage` - Variance of log wages
-
-## Output Structure
-
-### Results Directory
-```
+```         
 results/
-├── decomposition_results.csv
-├── complementarity_results.csv
-├── rto_results.csv
-└── plots/
-    ├── decomposition_results.png
-    ├── complementarity_mean_alpha.png
-    ├── complementarity_productivity.png
-    └── rto_mandate_results.png
+├── exp1_no_remote_20250827_143022.yaml
+├── exp1_no_remote_20250827_143022.csv
+├── exp2_remote_tech_20250827_143234.yaml
+├── exp2_remote_tech_20250827_143234.csv
+└── ...
 ```
 
-### Key Result Files
+## Key Features
 
-#### `decomposition_results.csv`
-| Column | Description |
-|--------|-------------|
-| Outcome | Variable name (E[alpha], Productivity, Var(log w)) |
-| TotalChange | Total change from 2019 to 2024 |
-| DueToPreferences | Change attributable to preference shifts |
-| DueToTechnology | Change attributable to technology shifts |
+### Parameter Sweeps
 
-#### `complementarity_results.csv`
-| Column | Description |
-|--------|-------------|
-| phi, nu | Parameter values on the grid |
-| mean_alpha | Mean remote work share |
-| agg_productivity | Aggregate productivity |
-| var_logwage | Wage inequality |
-| recalibrated_kappa | Re-calibrated κ₀ value |
+-   **Parallel Mode**: Parameters paired one-to-one
+-   **Grid Mode**: All parameter combinations tested
+-   Configurable through YAML without code changes
 
-#### `rto_results.csv`
-| Column | Description |
-|--------|-------------|
-| alpha_max | Maximum allowed remote work share |
-| mean_alpha | Realized mean remote work share |
-| change_* | Changes relative to unconstrained baseline |
+### Error Handling
 
-## Technical Notes
+-   Robust convergence checks
+-   Failed runs are recorded with error messages
+-   Experiments continue even if some parameter combinations fail
 
-### Solver Modifications for RTO Experiment
-The RTO experiment requires modifying the integration bounds in the surplus calculation. The key changes are:
+### Results Comparison
 
-1. **Constrained Integration**: Integration bounds change from [0,1] to [0,α_max]
-2. **Distribution Truncation**: The α distribution is truncated and renormalized
-3. **Equilibrium Recalculation**: All equilibrium objects are recalculated under the constraint
+-   Automatic percentage change calculations
+-   Baseline vs counterfactual comparisons
+-   Summary statistics across parameter ranges
 
-### Computational Considerations
-- **Complementarity Experiment**: Scales as O(n_phi × n_nu) with nested optimization
-- **Memory Usage**: Large grids may require significant memory for storing results
-- **Convergence**: Some parameter combinations may fail to converge
+### Extensibility
 
-### Troubleshooting
-1. **Convergence Issues**: Reduce grid size or parameter ranges
-2. **Memory Issues**: Process results in batches or reduce grid resolution
-3. **Missing Functions**: Ensure all required model functions are implemented
+-   Easy to add new experiments by copying existing templates
+-   Configuration-driven parameter modifications
+-   Modular design using shared model components
 
-## Extension Points
+## Implementation Notes
 
-### Adding New Experiments
-1. Create a new analysis file (e.g., `new_experiment.jl`)
-2. Implement experiment-specific functions
-3. Include the file in `run_counterfactuals.jl`
-4. Add plotting functions in `plotting_utils.jl`
+### Experiment 3 Special Case
 
-### Custom Constraints
-Modify `solver_extensions.jl` to implement different types of constraints:
-- Skill-specific constraints
-- Industry-specific policies
-- Progressive constraint schedules
+Experiment 3 uses a placeholder `solve_model_rto` function that needs to be implemented to handle remote work mandates. The function signature is:
 
-### Alternative Decompositions
-The framework can be extended to decompose other parameter groups:
-- Institutional vs. technological changes
-- Sector-specific vs. economy-wide changes
-- Supply vs. demand factors
+``` julia
+function solve_model_rto(prim, res; alpha_mandated=0.0, kwargs...)
+    # TODO: Implement constrained solver
+    # Should enforce alpha(h,psi) >= alpha_mandated
+end
+```
+
+### Dependencies
+
+All experiments use: - `../ModelSetup.jl`: Model structure definitions - `../ModelSolver.jl`: Solution algorithms\
+- `../ModelEstimation.jl`: Moment computation and utilities
+
+### Performance Tips
+
+-   Use `verbose=false` for parameter sweeps to reduce output
+-   Consider parallel processing for large parameter grids
+-   Monitor convergence failures in complex parameter regions
+
+## Troubleshooting
+
+### Common Issues
+
+1.  **Convergence Failures**: Try adjusting solver tolerance or iteration limits in config
+2.  **Memory Issues**: Reduce parameter grid sizes or run experiments separately
+3.  **Missing Dependencies**: Ensure all model files are in the correct relative paths
+
+### Debugging
+
+Use verbose mode to see detailed error messages:
+
+``` bash
+julia run_all_experiments.jl --experiments 3 --verbose
+```
+
+Check the YAML output files for complete error information and parameter values that caused failures.

@@ -1,5 +1,24 @@
-n_workers = 9 # 9 workers for parallel, 0 for serial
-include("../julia_config.jl")
+using Pkg
+Pkg.activate("/project/high_tech_ind/searching-flexibility")
+Pkg.instantiate()
+
+using Distributed
+addprocs(9)
+
+const ROOT = @__DIR__
+@everywhere begin
+    using Random, Statistics, SharedArrays, ForwardDiff
+    using Optimization, OptimizationOptimJL, Optim
+    include(joinpath($ROOT, "ModelSetup.jl"))
+    include(joinpath($ROOT, "ModelSolver.jl"))
+    include(joinpath($ROOT, "ModelEstimation.jl"))
+end
+using Random, Statistics
+using Term
+using Printf
+using CairoMakie
+using PrettyTables
+
 
 const FIGURES_DIR = joinpath(ROOT, "figures", "structural_model_heterogenous_preferences", "tests", "cross_moment_check")
 

@@ -8,17 +8,19 @@
 # MODE options: "production" (econ partition) or "standard" (short partition, default)
 #
 #SBATCH --job-name=MPI_Search             # Job name
-#SBATCH --partition=short                 # Default partition (override with MODE=production)
+#SBATCH --partition=econ                  # Use econ for longer wallclock (was short)
 #
 #SBATCH --nodes=1                         # Single node
-#SBATCH --ntasks=16                       # 16 MPI tasks
+#SBATCH --ntasks=96                       # Match GA population size for full search
 #SBATCH --cpus-per-task=1                 # 1 CPU per task
 #
 #SBATCH --mem=200G                        # Default: 200GB RAM
-#SBATCH --time=0-04:00:00                 # Default: 4 hours
+#SBATCH --time=0-12:00:00                 # 12h target (adjust if econ max differs)
 #
-#SBATCH --output=output/logs/mpi_search_%j.log    # Log files
-#SBATCH --error=output/logs/mpi_search_%j.err     # Error files
+# Store logs within the distributed_mpi_search subtree (requested path)
+# NOTE: Ensure directory exists before submission (it is created in repo).
+#SBATCH --output=src/structural_model_heterogenous_preferences/distributed_mpi_search/output/logs/mpi_search_%j.log
+#SBATCH --error=src/structural_model_heterogenous_preferences/distributed_mpi_search/output/logs/mpi_search_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL        # Email notifications
 #SBATCH --mail-user=mitchv34@gmail.com    # Email address
 
@@ -55,9 +57,12 @@ source /etc/bashrc
 # Change to project directory
 cd /project/high_tech_ind/searching-flexibility
 
-# Create output directories
+# Create (legacy root) output directories for backward compatibility
 mkdir -p output/logs
 mkdir -p output/mpi_results
+# Create colocated results/logs directories under distributed_mpi_search
+mkdir -p src/structural_model_heterogenous_preferences/distributed_mpi_search/output/logs
+mkdir -p src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results
 
 # Show environment info
 echo "Julia version: $(julia --version)"
@@ -74,15 +79,21 @@ JULIA_SCRIPT="src/structural_model_heterogenous_preferences/distributed_mpi_sear
 #==============================================================================
 
 echo "🚀 Starting MPI parameter search with $SLURM_NTASKS tasks..."
+echo "Rule-of-thumb: population size ≈ 10–15× n_params; adjust in config if needed."
 
-# Check if system image exists
-if [[ -f "$SYSIMAGE_PATH" ]]; then
-    echo "✓ System image found: $SYSIMAGE_PATH"
-    echo "  Size: $(ls -lh $SYSIMAGE_PATH | awk '{print $5}')"
-    JULIA_FLAGS="--startup-file=no --sysimage=$SYSIMAGE_PATH --project=."
+if [[ "${DISABLE_SYSIMAGE:-0}" == "1" ]]; then
+    echo "🚫 DISABLE_SYSIMAGE=1 -> ignoring system image even if present"
+    JULIA_FLAGS="--startup-file=no --project=."
 else
-    echo "⚠️  No system image found, using standard Julia startup"
-    JULIA_FLAGS="--project=."
+    # Check if system image exists
+    if [[ -f "$SYSIMAGE_PATH" ]]; then
+        echo "✓ System image found: $SYSIMAGE_PATH"
+        echo "  Size: $(ls -lh $SYSIMAGE_PATH | awk '{print $5}')"
+        JULIA_FLAGS="--startup-file=no --sysimage=$SYSIMAGE_PATH --project=."
+    else
+        echo "⚠️  No system image found, using standard Julia startup"
+        JULIA_FLAGS="--startup-file=no --project=."
+    fi
 fi
 
 echo "Julia flags: $JULIA_FLAGS"
@@ -90,6 +101,8 @@ echo "Using config: $CONFIG_FILE"
 echo ""
 
 # Run the Julia script (SlurmClusterManager handles worker spawning)
+echo "Running with JULIA_FLAGS: $JULIA_FLAGS"
+echo "Environment toggles: FORCE_SINGLE_PROCESS=${FORCE_SINGLE_PROCESS:-0} SKIP_STARTUP_TEST_EVAL=${SKIP_STARTUP_TEST_EVAL:-0} EARLY_EXIT_AFTER_INIT=${EARLY_EXIT_AFTER_INIT:-0}"
 julia $JULIA_FLAGS $JULIA_SCRIPT
 
 echo ""

@@ -1,0 +1,150 @@
+# Production Local Refinement Configuration
+# This file configures the second-stage ensemble optimization process
+
+# Global Search Results Configuration
+GlobalSearchResults:
+  # Job ID for the GA results (can be overridden by LOCAL_GA_JOB_ID environment variable)
+  job_id: null
+  
+  # Path to the MPI search configuration used for the global search
+  config_path: "path/to/mpi_search_config.yaml"
+  
+  # Path to the latest GA results CSV file ({job_id} will be replaced)
+  latest_results_file: "path/to/ga_results_{job_id}.csv"
+  
+  # Number of top candidates to use for local refinement (default: 5)
+  n_top_starts: 10
+  
+  # Optional: Subset of parameters to optimize (leave empty for all parameters)
+  parameter_subset: []
+  # Example: ["param1", "param2", "param3"]
+
+# Model Input Data Configuration
+ModelInputs:
+  # Main model configuration file
+  config_path: "config/structural_model_config.yaml"
+  
+  # Empirical moments data
+  data_moments_yaml: "data/results/data_moments/empirical_moments.yaml"
+  
+  # Weighting matrix for GMM estimation
+  weighting_matrix_csv: "data/results/weighting_matrix.csv"
+  
+  # Simulation data path
+  sim_data_path: "data/processed/simulation_scaffolding_all_years.feather"
+  
+  # Optional: Filter for specific moments (leave empty for all moments)
+  moment_filter: []
+  # Example: ["employment_rate", "wage_premium", "job_finding_rate"]
+
+# Optimization Algorithm Settings
+OptimizationSettings:
+  # Optimizer choice: "LBFGS", "BFGS", "NelderMead"
+  optimizer: "LBFGS"
+  
+  # Maximum number of iterations per trajectory
+  max_iterations: 5000
+  
+  # Convergence tolerance for gradient norm (gradient-based optimizers)
+  gradient_tolerance: 1.0e-7
+  
+  # Function tolerance (relative change in objective)
+  function_tolerance: 1.0e-10
+  
+  # Parameter tolerance (relative change in parameters)
+  parameter_tolerance: 1.0e-10
+  
+  # Parallel execution settings
+  parallel:
+    # Use threading for ensemble (true/false)
+    use_threads: true
+    
+    # Maximum number of threads (0 = auto-detect)
+    max_threads: 0
+
+# Candidate Selection Settings
+CandidateSelection:
+  # Quality quantile for initial filtering (top X% of candidates)
+  quality_quantile: 0.1
+  
+  # Diversity selection method: "farthest_point", "random", "grid"
+  diversity_method: "farthest_point"
+  
+  # Random seed for reproducibility (null = random)
+  random_seed: 12345
+
+# Output and Logging Configuration
+Output:
+  # Base directory for output files
+  output_directory: "output/"
+  
+  # Base directory for log files
+  log_directory: "logs/"
+  
+  # Save intermediate results during optimization
+  save_intermediate: false
+  
+  # Export formats for results
+  export_formats:
+    - "csv"
+    - "json"
+    # - "arrow"  # Uncomment for Arrow format
+  
+  # Compression for large result files
+  compress_results: false
+
+# Logging Configuration
+Logging:
+  # Log level: "DEBUG", "INFO", "WARN", "ERROR"
+  level: "INFO"
+  
+  # Include timestamps in console output
+  console_timestamps: true
+  
+  # Log performance metrics
+  performance_logging: true
+  
+  # Log function evaluations (can be verbose)
+  log_evaluations: false
+
+# Error Handling and Recovery
+ErrorHandling:
+  # Maximum number of retries for failed evaluations
+  max_retries: 3
+  
+  # Timeout for individual objective evaluations (seconds, 0 = no timeout)
+  evaluation_timeout: 300
+  
+  # Continue optimization if some trajectories fail
+  continue_on_partial_failure: true
+  
+  # Fallback optimizer if primary fails
+  fallback_optimizer: "NelderMead"
+
+# Performance Monitoring
+Performance:
+  # Enable memory usage monitoring
+  monitor_memory: true
+  
+  # Enable timing profiling
+  profile_timing: true
+  
+  # Report progress every N iterations
+  progress_interval: 100
+  
+  # Enable garbage collection monitoring
+  monitor_gc: false
+
+# Validation and Testing
+Validation:
+  # Validate objective function at random points before optimization
+  validate_objective: true
+  
+  # Number of validation points
+  validation_points: 5
+  
+  # Check gradient accuracy (for gradient-based optimizers)
+  check_gradients: false
+  
+  # Finite difference step for gradient checking
+  gradient_check_step: 1.0e-6

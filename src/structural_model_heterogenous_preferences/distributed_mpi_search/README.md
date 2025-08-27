@@ -21,7 +21,7 @@ distributed_mpi_search/
 ├── manage_mpi_search.sh       # Management utilities
 ├── analyze_mpi_results.jl     # Results analysis script
 ├── create_mpi_sysimage.jl     # System image creation
-├── MPI_sysimage.so           # Compiled system image (created)
+├── MPI_GridSearch_sysimage.so # Compiled system image (created)
 └── README.md                 # This file
 ```
 
@@ -106,7 +106,26 @@ For faster startup and improved performance:
 julia create_mpi_sysimage.jl
 ```
 
-This creates `MPI_sysimage.so` which reduces Julia startup time from ~30 seconds to ~2 seconds per worker.
+This creates `MPI_GridSearch_sysimage.so` which reduces Julia worker startup latency substantially.
+
+Environment toggles for the build script:
+```bash
+# Skip producing the .so (just execute warmup precompile path)
+SKIP_SYSIMAGE=1 julia create_mpi_sysimage.jl
+
+# Disable simulation moment warmup (faster build, less coverage)
+PRECOMPILE_SIM=0 julia create_mpi_sysimage.jl
+
+# Adjust lightweight solver iteration count used during warmup (default 50)
+PRECOMPILE_SOLVER_STEPS=20 julia create_mpi_sysimage.jl
+```
+
+Using the system image manually:
+```bash
+julia --sysimage=./MPI_GridSearch_sysimage.so mpi_search.jl
+```
+
+The submission script auto-detects the file if present; no flag required.
 
 ### Custom Configuration
 ```bash
@@ -210,7 +229,7 @@ module load mpi/openmpi
 #### System Image Issues
 ```bash
 # Remove corrupted system image
-rm MPI_sysimage.so
+rm MPI_GridSearch_sysimage.so
 
 # Recreate system image
 julia create_mpi_sysimage.jl

@@ -89,10 +89,19 @@ end
 #?=========================================================================================
 #? Initialization and Helper Functions
 #?=========================================================================================
-function create_primitives_from_yaml(yaml_file::String)
-    # This function loads 'μ' from the YAML file and correctly constructs 
-    # the Primitives object with Gumbel distribution parameters.
-    config = YAML.load_file(yaml_file, dicttype=OrderedDict)
+function create_primitives_from_yaml(source)
+    # Handle both YAML file path and dictionary input
+    config = if source isa AbstractString
+        # Load from YAML file
+        YAML.load_file(source, dicttype=OrderedDict)
+    elseif source isa AbstractDict
+        # Use dictionary directly, converting keys to strings for compatibility
+        Dict(string(k) => (v isa AbstractDict ? Dict(string(k2) => v2 for (k2, v2) in v) : v) 
+             for (k, v) in source)
+    else
+        error("Source must be either a YAML file path (String) or a configuration dictionary")
+    end
+    
     mp = get(config, "ModelParameters", Dict())
     mg = get(config, "ModelGrids", Dict())
 
@@ -157,12 +166,12 @@ function create_primitives_from_yaml(yaml_file::String)
 
     return prim
 end
-function initializeModel(yaml_file::String)
-    prim = create_primitives_from_yaml(yaml_file)
+
+function initializeModel(source)
+    prim = create_primitives_from_yaml(source)
     res = Results(prim)
     return prim, res
 end
-
 #?=========================================================================================
 #? Helper Functions
 #?=========================================================================================

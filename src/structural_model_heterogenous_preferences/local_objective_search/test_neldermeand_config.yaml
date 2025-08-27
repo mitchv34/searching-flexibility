@@ -1,0 +1,75 @@
+# Test Configuration for NelderMead SLURM Run
+# 30 independent searches with 2 max iterations for testing
+
+# Source of global search results
+GlobalSearchResults:
+  latest_results_file: "/project/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/distributed_mpi_search/output/results/mpi_search_results_job{job_id}_valid_objectives.csv"
+  job_id: 3056705
+  n_top_starts: 30           # Test with 30 candidates
+  min_relative_obj_gap: 1e-5
+  deduplicate_exact: true
+  parameter_subset: []
+  config_path: "/project/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/distributed_mpi_search/mpi_search_config.yaml"
+
+# SLURM Configuration for Test Run
+SlurmConfig:
+  job_name: "test_neldermead_30"
+  partition: "econ-grad-short"
+  account: ""
+  qos: ""
+  
+  # Resource allocation for test
+  total_candidates: 30        # 30 independent searches
+  batch_size: 10              # 10 candidates per job (3 jobs total)
+  cores_per_job: 10           # 10 cores per job
+  memory_per_job: "32GB"      # 32GB per job
+  time_limit: "1:00:00"       # 1 hour should be plenty for 2 iterations
+  
+  # Output configuration
+  output_dir: "src/structural_model_heterogenous_preferences/local_objective_search/slurm_output/test_run"
+  log_prefix: "test_neldermead"
+  
+  # Email notifications (optional)
+  email: ""
+  email_type: "END,FAIL"
+  
+  # Advanced settings
+  exclusive: false
+  constraint: ""
+
+# Optimization Settings - NelderMead with 2 iterations for testing
+OptimizationSettings:
+  optimizer: "NelderMead"     # Use NelderMead for this test
+  max_iterations: 2000           # Just 2 iterations for testing
+  gradient_tolerance: 1e-6    # Not used by NelderMead but kept for compatibility
+  function_abstol: 1e-10
+  function_reltol: 1e-10
+  parameter_abstol: 1e-10
+  parameter_reltol: 1e-10
+  
+  # Parallel execution settings
+  parallel:
+    use_threads: true
+    max_threads: 0            # Auto-detect
+
+# Model & data inputs
+ModelInputs:
+  config_path: "/project/high_tech_ind/searching-flexibility/src/structural_model_heterogenous_preferences/distributed_mpi_search/mpi_search_config.yaml"
+  data_moments_yaml: "/project/high_tech_ind/searching-flexibility/data/results/data_moments/data_moments_2024.yaml"
+  weighting_matrix_csv: "/project/high_tech_ind/searching-flexibility/data/results/data_moments/smm_weighting_matrix_2024.csv"
+  sim_data_path: "/project/high_tech_ind/searching-flexibility/data/processed/simulation_scaffolding_2024.feather"
+  moment_filter: []
+
+# Output configuration
+Output:
+  results_dir: "src/structural_model_heterogenous_preferences/local_objective_search/output/test_run"
+  save_each_start: true
+  summary_file: "test_neldermead_summary.json"
+  detailed_prefix: "test_neldermead_start"
+  overwrite: true
+
+# Logging
+Logging:
+  verbose: true
+  timestamp_runs: true
+  log_file: "test_neldermead.log"

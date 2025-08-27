@@ -4,7 +4,7 @@
 
 ===========================================================================================#
 
-using Parameters, Printf, Term, Distributions, ForwardDiff, YAML
+using Parameters, Printf, Distributions, ForwardDiff, YAML
 #?=========================================================================================
 #? Solver Configuration
 #?=========================================================================================
@@ -37,8 +37,19 @@ values from the ModelSolverOptions section of the YAML file.
 # Returns
 - `SolverConfig{T}`: Configuration struct with solver options
 """
-function load_solver_config_from_yaml(yaml_file::String; T::Type=Float64)
-    config = YAML.load_file(yaml_file, dicttype=Dict)
+function load_solver_config_from_yaml(source; T::Type=Float64)
+    # Handle both YAML file path and dictionary input
+    config = if source isa AbstractString
+        # Load from YAML file
+        YAML.load_file(source, dicttype=OrderedDict)
+    elseif source isa AbstractDict
+        # Use dictionary directly, converting keys to strings for compatibility
+        Dict(string(k) => (v isa AbstractDict ? Dict(string(k2) => v2 for (k2, v2) in v) : v) 
+                for (k, v) in source)
+    else
+        error("Source must be either a YAML file path (String) or a configuration dictionary")
+    end
+
     solver_opts = get(config, "ModelSolverOptions", Dict())
     
     # Helper function to get value with type conversion
@@ -143,6 +154,251 @@ function calculate_analytical_logit_flow_surplus(prim::Primitives{T}) where {T<:
     return s_flow
 end
 
+
+#?=========================================================================================
+#? ANCHORED SOLVER (v4.0 - Data-Driven Vacancy Distribution, August 2025)
+#? Features vacancy distribution anchoring to match empirical data
+#?=========================================================================================
+
+"""
+    solve_model_anchored(prim, res; config=nothing, kwargs...)
+
+**ANCHORED SOLVER v4.0 (Data-Driven Vacancy Distribution, August 2025)**
+
+Solver that anchors the vacancy distribution shape to empirical data while allowing
+the total level to be endogenous. This is useful for structural estimation where
+we want to match observed vacancy distributions across firm types.
+
+The key innovation is treating prim.ψ_pdf as the target vacancy distribution shape
+rather than the exogenous firm type distribution. The solver finds equilibrium
+conditions that generate this target distribution.
+
+# Algorithm
+1. Use prim.ψ_pdf as the target vacancy distribution shape (v_shape)
+2. Calculate endogenous surplus and unemployment as usual
+3. Determine total vacancy level V endogenously through market clearing
+4. Force vacancy distribution to match target shape: Γ = v_shape
+5. Solve for consistent equilibrium with this constraint
+
+# Arguments
+- `prim::Primitives{T}`: Model primitives (ψ_pdf interpreted as target vacancy shape)
+- `res::Results{T}`: Results structure to update
+- `config::Union{SolverConfig, Nothing, String}`: Solver configuration (optional)
+- `kwargs...`: Individual parameters to override config
+
+# Additional Keyword Arguments
+- `anchor_weight::Float64=1.0`: Weight on anchoring constraint (1.0 = full anchoring)
+- `min_vacancy_level::Float64=1e-6`: Minimum total vacancy level to prevent degeneracy
+
+# Returns
+- `status::Symbol`: Convergence status
+- `anchoring_error::Float64`: Final deviation from target vacancy distribution
+"""
+function solve_model(
+                        prim::Primitives{T},
+                        res::Results{T};
+                        config::Union{SolverConfig{T}, Nothing, String}=nothing,
+                        kwargs...
+                    ) where {T<:Real}
+    #! For testing block
+    # prim = deepcopy(prim_optimized)
+    # res = deepcopy(res_optimized)
+    # config = nothing
+    # kwargs = Dict()
+    #! End of testing block
+    # Handle configuration (same as other solvers)
+    if config !== nothing
+        if typeof(config) == String
+            config = load_solver_config_from_yaml(config)
+        end
+        final_config = merge_solver_config(config; kwargs...)
+        
+        initial_S = final_config.initial_S
+        tol = final_config.tol
+        max_iter = final_config.max_iter
+        verbose = final_config.verbose
+        print_freq = final_config.print_freq
+        λ_S_init = final_config.λ_S_init
+        λ_u_init = final_config.λ_u_init
+    else
+        initial_S = get(kwargs, :initial_S, nothing)
+        tol = get(kwargs, :tol, 1e-8)
+        max_iter = get(kwargs, :max_iter, 5000)
+        verbose = get(kwargs, :verbose, true)
+        print_freq = get(kwargs, :print_freq, 50)
+        λ_S_init = get(kwargs, :λ_S_init, 0.01)
+        λ_u_init = get(kwargs, :λ_u_init, 0.01)
+    end
+
+    @unpack h_grid, ψ_grid, β, δ, ξ, κ₀, κ₁, n_h, n_ψ, γ₀, γ₁ = prim
+    f_h = prim.h_pdf
+    
+    # --- KEY CHANGE: Interpret ψ_pdf as target vacancy distribution shape ---
+    v_shape = copy(prim.ψ_pdf)
+    v_shape ./= sum(v_shape) # Ensure it's normalized
+    
+    # Calculate flow surplus
+    s_flow_base = calculate_logit_flow_surplus_with_curvature(prim)
+
+    # Initialize main arrays
+    S_final = isnothing(initial_S) ? copy(s_flow_base) : copy(initial_S)
+    u_final = copy(f_h)
+    
+    # Pre-allocate arrays
+    S_old = similar(S_final)
+    u_old = similar(u_final)
+    u_dist = similar(u_final)
+    B = Vector{T}(undef, n_ψ)
+    Γ = Vector{T}(undef, n_ψ)             # Actual vacancy distribution used
+    ExpectedSearch = Vector{T}(undef, n_h)
+    b_h = Vector{T}(undef, n_h)
+    s_flow_net = similar(S_final)
+    S_update = similar(S_final)
+    ProbAccept = Vector{T}(undef, n_h)
+    unemp_rate = Vector{T}(undef, n_h)
+    u_update = similar(u_final)
+
+    # Pre-allocate V_actual so we can keep it after the iteration loop
+    V_actual = 0.0
+
+    # Pre-calculate constants
+    denom = 1.0 - β * (1.0 - δ)
+    ΔS = Inf
+    λ_S = λ_S_init
+    λ_u = λ_u_init
+    status = :notConverged
+
+    if verbose
+        println("Starting anchored solver with target vacancy shape anchoring...")
+    end
+
+    for k in 1:max_iter
+        copy!(S_old, S_final)
+        copy!(u_old, u_final)
+
+        # --- Part 1: Calculate B and L from previous iteration ---
+        L = sum(u_old)
+        @. u_dist = u_old / L
+        calculate_B!(B, S_old, u_dist, prim.ξ) # B is the firm's expected surplus share
+
+        # --- Part 2: THE CORE OF THE ANCHORED METHOD ---
+        # We use the free-entry condition to solve for the TOTAL LEVEL of vacancies (V)
+        # that is consistent with the ANCHORED SHAPE (v_shape).
+        
+        # The "value" of the average vacancy, weighted by the target shape
+        B_integral_anchored = 0.0
+        for j in 1:n_ψ
+            B_integral_anchored += max(zero(eltype(B)), B[j])^(1/prim.κ₁) * v_shape[j]
+        end
+        
+        # This is the key equation. It solves for the market tightness θ that is
+        # consistent with the surplus B and the anchored vacancy shape v_shape.
+        θ = ((1/L) * (prim.γ₀/prim.κ₀)^(1/prim.κ₁) * B_integral_anchored)^(1 / (1 + prim.γ₁/prim.κ₁))
+        
+        # From this single, consistent θ, all other aggregates follow
+        p = prim.γ₀ * θ^(1 - prim.γ₁)
+        q = prim.γ₀ * θ^(-prim.γ₁)
+        
+        # The vacancy distribution Γ IS the target shape.
+        Γ .= v_shape
+        
+        # The total level of vacancies V is now an outcome
+        V_actual = L * θ
+        
+        # --- Part 3: Update Surplus using the consistent, anchored distribution ---
+        
+        # Calculate expected search value using the anchored Γ
+        mul!(ExpectedSearch, max.(0.0, S_old), Γ)
+        
+        # Calculate the endogenous b(h) vector using the anchored Γ
+        # (Note: your previous code had a bug here, using S_old * Γ_old)
+        mul!(b_h, S_old, Γ)
+        @. b_h = prim.b * prim.ξ * b_h
+        
+        # Calculate net flow surplus
+        @. s_flow_net = s_flow_base - b_h
+
+        # Update surplus using the consistent p
+        @. S_update = (s_flow_net - (β * p * prim.ξ * ExpectedSearch)) / denom
+        @. S_final = (1.0 - λ_S) * S_old + λ_S * S_update
+
+        # --- Part 4: Update unemployment using the consistent p and anchored Γ ---
+        mul!(ProbAccept, (S_final .> 0.0), Γ)
+        @. unemp_rate = δ / (δ + p * ProbAccept)
+        @. u_update = unemp_rate * f_h
+        @. u_final = (1.0 - λ_u) * u_old + λ_u * u_update
+
+        # --- Part 5: Convergence check ---
+        ΔS = 0.0
+        for i in eachindex(S_final)
+            ΔS = max(ΔS, abs(S_final[i] - S_old[i]))
+        end
+
+        if verbose && (k % print_freq == 0 || k == 1)
+            @printf("Iter %4d: ΔS = %.12e, V = %.6f, θ = %.6f\n", 
+                    k, ΔS, V_actual, θ)
+        end
+        
+        if ΔS < tol
+            if verbose
+                println("Converged after $k iterations.")
+            end
+            status = :converged
+            break
+        end
+    end
+
+    # Update final results
+    res.u .= u_final
+    res.S .= S_final
+    
+    # Compute final outcomes with anchored vacancy distribution
+    compute_final_outcomes_anchored!(prim, res, Γ, V_actual)
+    
+    # The anchoring error is now implicitly zero by construction
+    return status, 0.0
+end
+
+"""
+    compute_final_outcomes_anchored!(prim, res, Γ, V_total)
+
+Compute final equilibrium outcomes using the anchored vacancy distribution.
+This is a modified version of compute_final_outcomes! that uses the provided
+vacancy distribution instead of deriving it from free entry.
+"""
+function compute_final_outcomes_anchored!(
+                                prim::Primitives{T}, 
+                                res::Results{T}, 
+                                Γ::Vector{T}, 
+                                V_total::T
+                            ) where {T<:Real}
+    @unpack β, δ, ξ, b, h_grid, γ₀, γ₁, κ₀, κ₁ = prim
+    
+    # Use provided vacancy distribution instead of deriving from free entry
+    L = sum(res.u)
+    u_dist = res.u ./ L
+    
+    # Calculate B using current surplus and unemployment
+    B = vec(sum((1.0 - ξ) .* max.(0.0, res.S) .* u_dist, dims=1))
+    
+    # Calculate market tightness from total vacancies and unemployment
+    θ = V_total / L
+    res.θ = θ
+    res.p = γ₀ * θ^(1 - γ₁)
+    res.q = γ₀ * θ^(-γ₁)
+    
+    # Use anchored vacancy distribution
+    res.v = V_total .* Γ
+    
+    # Calculate final outcomes
+    exp_val_S = max.(0.0, res.S) * Γ
+    res.U .= (b .* h_grid .+ β * res.p * ξ .* exp_val_S) ./ (1 - β)
+    
+    # Employment flows using anchored distribution
+    res.n .= res.p .* (res.u * Γ') .* (res.S .> 0.0) ./ δ
+end
+
+
 #?=========================================================================================
 #? Final Outcomes Calculation (Post-Convergence)
 #?=========================================================================================
@@ -190,7 +446,9 @@ function calculate_logit_flow_surplus_with_curvature(prim::Primitives{T}) where 
         
         for i_ψ in 1:n_ψ
             ψ = ψ_grid[i_ψ]
-            g = ψ₀ * exp(ν * ψ + ϕ * h)
+            # g = ψ₀ * exp(ν * ψ + ϕ * h) #? Exponential production function
+            g = @. ψ₀ * (h^ϕ) * (ψ^ν) #? Cobb-Douglas production function
+
 
             # --- Define the core value function V(α) ---
             # This is the deterministic part of match utility
@@ -253,7 +511,7 @@ For legacy version, see `solve_model_legacy()` below.
 - `λ_S_init::Float64=0.01`: Initial dampening parameter for surplus
 - `λ_u_init::Float64=0.01`: Initial dampening parameter for unemployment
 """
-function solve_model(
+function solve_model_no_anchor(
                         prim::Primitives{T},
                         res::Results{T};
                         config::Union{SolverConfig{T}, Nothing, String}=nothing,
@@ -343,14 +601,14 @@ function solve_model(
         one_minus_ξ = 1.0 - ξ
         for j in 1:n_ψ
             for i in 1:n_h
-                B[j] += one_minus_ξ * max(0.0, S_old[i, j]) * u_dist[i]
+                B[j] += one_minus_ξ * max(zero(eltype(S_old)), S_old[i, j]) * u_dist[i]
             end
         end
         
         # B_integral = sum(max.(0.0, B).^(1/κ₁) .* f_ψ) (in-place computation)
         B_integral = 0.0
         for j in 1:n_ψ
-            B_integral += max(0.0, B[j])^inv_κ₁ * f_ψ[j]
+            B_integral += max(zero(eltype(B)), B[j])^inv_κ₁ * f_ψ[j]
         end
         
         θ = ((1/L) * (γ₀/κ₀)^inv_κ₁ * B_integral)^(1 / (1 + γ₁*inv_κ₁))
@@ -387,8 +645,8 @@ function solve_model(
         fill!(ExpectedSearch, 0.0)
         for i in 1:n_h
             for j in 1:n_ψ
-                val = max(0.0, S_old[i, j])
-                if val > 0.0
+                val = max(zero(eltype(S_old)), S_old[i, j])
+                if val > zero(eltype(S_old))
                     ExpectedSearch[i] += val * Γ[j]
                 end
             end
@@ -584,7 +842,7 @@ function calculate_B!(B::Vector{T}, S_old::Matrix{T}, u_dist::Vector{T}, ξ::T) 
     one_minus_ξ = 1.0 - ξ
     for j in 1:n_ψ
         for i in 1:n_h
-            B[j] += one_minus_ξ * max(0.0, S_old[i, j]) * u_dist[i]
+            B[j] += one_minus_ξ * max(zero(eltype(S_old)), S_old[i, j]) * u_dist[i]
         end
     end
     return nothing
@@ -726,7 +984,7 @@ function solve_model_adaptive(
         calculate_B!(B, S_old, u_dist, ξ)
         B_integral = 0.0
         for j in 1:n_ψ
-            B_integral += max(0.0, B[j])^inv_κ₁ * f_ψ[j]
+            B_integral += max(zero(eltype(B)), B[j])^inv_κ₁ * f_ψ[j]
         end
         
         θ = ((1/L) * (γ₀/κ₀)^inv_κ₁ * B_integral)^(1 / (1 + γ₁*inv_κ₁))
@@ -740,8 +998,8 @@ function solve_model_adaptive(
         fill!(ExpectedSearch, 0.0)
         for i in 1:n_h
             for j in 1:n_ψ
-                val = max(0.0, S_old[i, j])
-                if val > 0.0
+                val = max(zero(eltype(S_old)), S_old[i, j])
+                if val > zero(eltype(S_old))
                     ExpectedSearch[i] += val * Γ[j]
                 end
             end

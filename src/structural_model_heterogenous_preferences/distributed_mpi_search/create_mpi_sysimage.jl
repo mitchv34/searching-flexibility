@@ -16,17 +16,34 @@ end
 
 # Add required packages for MPI functionality
 required_packages = [
-    "ClusterManagers",
-    "MPI", 
+    # Parallel / cluster
     "Distributed",
+    "ClusterManagers",
+    "SlurmClusterManager",
+    "MPI",
+    # Model & math
+    "Parameters",
+    "Distributions",
+    "ForwardDiff",
+    "QuadGK",
+    "Interpolations",
+    # Data & IO
+    "DataFrames",
+    "CSV",
+    "Arrow",
     "YAML",
     "JSON3",
+    "OrderedCollections",
+    # Estimation / regression
+    "FixedEffectModels",
+    # Misc utilities
     "QuasiMonteCarlo",
     "Statistics",
     "LinearAlgebra",
     "Random",
     "Dates",
-    "Printf"
+    "Printf",
+    "Term"
 ]
 
 println("🏗️  CREATING MPI SYSTEM IMAGE")
@@ -55,100 +72,95 @@ const MODEL_DIR = joinpath(ROOT, "src", "structural_model_heterogenous_preferenc
 precompile_script = joinpath(MPI_SEARCH_DIR, "precompile_mpi.jl")
 
 precompile_code = """
-# Precompilation script for MPI distributed search
+# Precompilation script for MPI distributed search (extended)
 using Pkg
-Pkg.activate("$ROOT")
+Pkg.activate(\"$ROOT\")
 
-# Load all required packages
-using ClusterManagers
-using MPI
-using Distributed
-using YAML, JSON3
+using Distributed, ClusterManagers, SlurmClusterManager, MPI
+using Parameters, Distributions, ForwardDiff, QuadGK, Interpolations
+using DataFrames, CSV, Arrow
+using YAML, JSON3, OrderedCollections
+using FixedEffectModels
 using QuasiMonteCarlo
-using Statistics, LinearAlgebra, Random
-using Dates, Printf
+using Statistics, LinearAlgebra, Random, Dates, Printf
+# Term removed to reduce risk of constant redefinition across processes
 
-println("✓ Core packages loaded")
+println(\"✓ Core & extended packages loaded\")
 
-# Include model files to precompile them
-const MODEL_DIR = "$MODEL_DIR"
-const MPI_SEARCH_DIR = "$MPI_SEARCH_DIR"
+const MODEL_DIR = \"$MODEL_DIR\"
+const MPI_SEARCH_DIR = \"$MPI_SEARCH_DIR\"
 
-try
-    include(joinpath(MODEL_DIR, "ModelSetup.jl"))
-    println("✓ ModelSetup.jl precompiled")
-catch e
-    println("⚠️  Could not precompile ModelSetup.jl: \$e")
+function _tryinclude(fname)
+    try
+        include(joinpath(MODEL_DIR, fname))
+        println(\"✓ \$fname precompiled\")
+    catch e
+        println(\"⚠️  Could not precompile \$fname: \$e\")
+    end
 end
 
-try
-    include(joinpath(MODEL_DIR, "ModelSolver.jl"))
-    println("✓ ModelSolver.jl precompiled")
-catch e
-    println("⚠️  Could not precompile ModelSolver.jl: \$e")
-end
+_tryinclude(\"ModelSetup.jl\")
+_tryinclude(\"ModelSolver.jl\")
+_tryinclude(\"ModelEstimation.jl\")
 
+# Config & basic YAML / JSON
 try
-    include(joinpath(MODEL_DIR, "ModelEstimation.jl"))
-    println("✓ ModelEstimation.jl precompiled")
-catch e
-    println("⚠️  Could not precompile ModelEstimation.jl: \$e")
-end
-
-# Precompile common operations
-println("🔥 Precompiling common operations...")
-
-# Test YAML loading
-try
-    config_file = joinpath(MPI_SEARCH_DIR, "mpi_search_config.yaml")
+    config_file = joinpath(MPI_SEARCH_DIR, \"mpi_search_config.yaml\")
     if isfile(config_file)
-        test_config = YAML.load_file(config_file)
-        println("✓ YAML operations precompiled")
+        cfg = YAML.load_file(config_file)
+        println(\"✓ YAML config load\")
+    end
+    json_str = JSON3.write(Dict(\"a\"=>1, \"b\"=>[1,2,3]))
+    JSON3.read(json_str)
+    println(\"✓ JSON ops\")
+catch e
+    println(\"⚠️  Config/JSON precompile issue: \$e\")
+end
+
+# Light solver + simulation warmup (guarded by env)
+do_sim = get(ENV, \"PRECOMPILE_SIM\", \"1\") != \"0\"
+solver_steps = try parse(Int, get(ENV, \"PRECOMPILE_SOLVER_STEPS\", \"50\")) catch; 50 end
+
+try
+    if @isdefined initializeModel
+        prim, res = initializeModel(joinpath(MPI_SEARCH_DIR, \"mpi_search_config.yaml\"))
+        println(\"✓ initializeModel\")
+        # Quick solve (reduced iterations)
+        solve_model(prim, res; max_iter=solver_steps, tol=1e-4, verbose=false)
+        println(\"✓ solve_model warmup\")
+        # Analytic moments compile
+        compute_model_moments(prim, res; include=[:mean_alpha, :var_alpha])
+        println(\"✓ analytic moments warmup\")
+        if do_sim && @isdefined simulate_model_data
+            # Attempt simulation; small sample by truncating after load
+            sim_path = joinpath(\"$ROOT\", \"data\", \"processed\", \"simulation_scaffolding_2024.feather\")
+            if isfile(sim_path)
+                sim_df_full = simulate_model_data(prim, res, sim_path)
+                sim_df = sim_df_full[1:min(1000, nrow(sim_df_full)), :]
+                compute_model_moments(prim, res, sim_df; include=[:mean_logwage, :mean_alpha])
+                println(\"✓ simulation moments warmup (subset)\")
+            else
+                # Synthetic minimal DF for compile if file absent
+                sim_df = DataFrame(u_h=rand(100), u_psi=rand(100), u_alpha=rand(100),
+                                   h_values=rand(100), ψ_values=rand(100), alpha=rand(100),
+                                   base_wage=rand(100), compensating_diff=rand(100),
+                                   logwage=rand(100), experience=rand(100), experience_sq=rand(100),
+                                   industry=repeat([\"A\",\"B\"], 50), occupation=repeat([\"X\",\"Y\"],50),
+                                   educ=repeat([\"HS\",\"BA\"],50), sex=repeat([\"M\",\"F\"],50), race=repeat([\"W\",\"O\"],50))
+                compute_model_moments_from_simulation(prim, res, sim_df; include_moments=[:mean_logwage])
+                println(\"✓ synthetic simulation warmup\")
+            end
+        end
+        compute_distance(Dict(:mean_alpha=>0.1), Dict(:mean_alpha=>0.05))
+        println(\"✓ distance function warmup\")
     else
-        # Create minimal test config
-        test_dict = Dict("test" => "value", "array" => [1, 2, 3])
-        test_yaml = YAML.write(test_dict)
-        println("✓ YAML operations precompiled (minimal)")
+        println(\"⚠️  initializeModel not defined – skipped solver warmup\")
     end
 catch e
-    println("⚠️  YAML precompilation issue: \$e")
+    println(\"⚠️  Warmup phase issue (continuing): \$e\")
 end
 
-# Test JSON operations
-try
-    test_data = Dict("params" => [1.0, 2.0, 3.0], "objective" => 0.5)
-    json_str = JSON3.write(test_data)
-    parsed = JSON3.read(json_str)
-    println("✓ JSON operations precompiled")
-catch e
-    println("⚠️  JSON precompilation issue: \$e")
-end
-
-# Test distributed operations
-try
-    # Test pmap with simple function
-    test_func(x) = x^2 + sin(x)
-    test_data = [1.0, 2.0, 3.0, 4.0]
-    result = map(test_func, test_data)  # Use map since we don't have workers yet
-    println("✓ Distributed operations precompiled")
-catch e
-    println("⚠️  Distributed precompilation issue: \$e")
-end
-
-# Test MPI-related operations (basic)
-try
-    # Basic MPI operations that don't require actual MPI environment
-    if haskey(ENV, "SLURM_NTASKS")
-        n_tasks = parse(Int, ENV["SLURM_NTASKS"])
-        println("✓ SLURM integration precompiled")
-    else
-        println("✓ MPI integration precompiled (no SLURM env)")
-    end
-catch e
-    println("⚠️  MPI precompilation issue: \$e")
-end
-
-println("🎯 Precompilation script completed successfully!")
+println(\"🎯 Extended precompilation script completed\")
 """
 
 # Write precompilation script
@@ -165,39 +177,31 @@ println("🚀 Creating system image...")
 println("  Output: $sysimage_path")
 println("  This may take several minutes...")
 
-try
-    create_sysimage(
-        required_packages;
-        sysimage_path = sysimage_path,
-        precompile_execution_file = precompile_script,
-        cpu_target = "generic",  # For compatibility across different nodes
-        filter_stdlibs = false
-    )
-    
-    println("✅ System image created successfully!")
-    
-    # Check file size
-    if isfile(sysimage_path)
-        size_mb = round(stat(sysimage_path).size / (1024^2), digits=1)
-        println("📏 System image size: $(size_mb) MB")
-        
-        # Test the system image
-        println("🧪 Testing system image...")
-        test_cmd = `julia --startup-file=no --sysimage=$sysimage_path -e "println(\"✓ System image test successful\")"`
-        run(test_cmd)
-        
-        println("🎉 System image is ready for use!")
-        println("📋 To use this system image:")
-        println("   julia --sysimage=$sysimage_path your_script.jl")
-        
-    else
-        println("❌ System image file not found after creation")
+if get(ENV, "SKIP_SYSIMAGE", "0") == "1"
+    println("⏭️  SKIP_SYSIMAGE=1 set; skipping system image build (precompile script executed).")
+else
+    try
+        create_sysimage(
+            required_packages;
+            sysimage_path = sysimage_path,
+            precompile_execution_file = precompile_script,
+            cpu_target = "generic",  # cross-node compatibility
+            filter_stdlibs = false
+        )
+        println("✅ System image created successfully!")
+        if isfile(sysimage_path)
+            size_mb = round(stat(sysimage_path).size / (1024^2), digits=1)
+            println("📏 System image size: $(size_mb) MB")
+            println("🧪 Testing system image...")
+            run(`julia --startup-file=no --sysimage=$sysimage_path -e "println(\"✓ System image test successful\")"`)
+            println("🎉 System image is ready. Use: julia --sysimage=$sysimage_path your_script.jl")
+        else
+            println("❌ System image file missing after build")
+        end
+    catch e
+        println("❌ Failed to create system image: $e")
+        println("💡 Proceed without it; startup will be slower.")
     end
-    
-catch e
-    println("❌ Failed to create system image: $e")
-    println("💡 You can still run the MPI search without a system image")
-    println("   (it will just take longer to start up)")
 end
 
 # Clean up precompilation script

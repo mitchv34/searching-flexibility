@@ -68,12 +68,12 @@ function objective_function_timed(params, p, timer::TimerOutput)
 			p.last_res[] = res_new
 		end
 
-		model_moments = @timeit timer "3. compute_moments" compute_model_moments(
-			prim_new, res_new; 
-			include = [:mean_logwage, :var_logwage, :diff_logwage_inperson_remote, 
-					  :remote_share, :hybrid_share, :diff_logwage_high_lowpsi, 
-					  :diff_alpha_high_lowpsi, :market_tightness]
-		)
+        model_moments = @timeit timer "3. compute_moments" compute_model_moments(
+            prim_new, res_new; 
+            include = [:mean_logwage, :var_logwage, :diff_logwage_inperson_remote, 
+                      :remote_share, :hybrid_share, :wage_premium_high_psi, 
+                      :diff_alpha_high_lowpsi, :market_tightness]
+        )
 		loss = @timeit timer "4. compute_distance" compute_distance(
 			model_moments,
 			p.target_moments,
@@ -373,7 +373,7 @@ p_warm = (
     target_moments = compute_model_moments(
         prim_true, res_true; 
         include = [:mean_logwage, :var_logwage, :diff_logwage_inperson_remote, 
-                  :remote_share, :hybrid_share, :diff_logwage_high_lowpsi, 
+                  :remote_share, :hybrid_share, :wage_premium_high_psi, 
                   :diff_alpha_high_lowpsi, :market_tightness]
     ),
     param_names = params_to_estimate,

@@ -1,0 +1,115 @@
+# Counterfactual Experiments Configuration
+# Central configuration file for all counterfactual experiments
+
+# Base model parameters (uses ESTIMATED parameters as baseline for counterfactuals)
+BaseModelConfig:
+  config_path: "data/results/estimated_parameters/estimated_parameters_2024.yaml"
+  description: "Estimated parameters from 2024 data serving as 'true' baseline model"
+
+# Experiment 1: No Remote Work Technology
+# Eliminates remote work by setting remote productivity to zero
+Experiment1_NoRemoteWork:
+  name: "No Remote Work Technology"
+  description: "Counterfactual where remote work technology is eliminated (ψ₀ = 0)"
+  parameter_overrides:
+    ψ₀: 0.0
+  output_prefix: "exp1_no_remote"
+
+# Experiment 2: Remote Work Technology Levels
+# Tests different levels of remote work technology
+Experiment2_RemoteTechLevels:
+  name: "Remote Work Technology Levels"
+  description: "Compare different levels of remote work technology productivity"
+  parameter_sweeps:
+    ψ₀: [0.3, 0.5, 0.7, 0.9, 1.2]  # Different baseline remote productivity levels
+    ν: [0.1, 0.25, 0.4, 0.6]          # Different returns to firm-specific remote tech
+  # Can run as grid (all combinations) or parallel (same length arrays)
+  sweep_mode: "parallel"  # or "grid"
+  output_prefix: "exp2_remote_tech"
+
+# Experiment 3: Remote Work Mandate
+# Mandates minimum remote work levels using solve_model_rto
+Experiment3_RemoteMandate:
+  name: "Remote Work Mandate"
+  description: "Policy experiment mandating minimum remote work levels"
+  parameter_overrides: {}  # Use baseline parameters
+  mandate_levels:
+    alpha_mandated: [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]  # Minimum remote work fractions
+  solver_function: "solve_model_rto"  # Special solver with mandate constraint
+  output_prefix: "exp3_mandate"
+
+# Experiment 4: Search Friction Variations
+# Examines impact of different search frictions
+Experiment4_SearchFrictions:
+  name: "Search Friction Variations"
+  description: "Impact of different search market frictions"
+  parameter_sweeps:
+    κ₀: [50.0, 75.0, 100.0, 150.0, 200.0]  # Vacancy posting costs
+    κ₁: [0.5, 0.75, 1.0, 1.25, 1.5]        # Elasticity of vacancy creation
+  sweep_mode: "grid"  # Test all combinations
+  output_prefix: "exp4_frictions"
+
+# Experiment 5: Unemployment Benefit Levels
+# Tests impact of different unemployment benefit generosity
+Experiment5_UnemploymentBenefits:
+  name: "Unemployment Benefit Levels"
+  description: "Impact of different unemployment benefit levels"
+  parameter_sweeps:
+    b: [0.05, 0.1, 0.15, 0.2, 0.3, 0.4]  # Unemployment benefit levels
+  output_prefix: "exp5_benefits"
+
+# Experiment 6: Worker Bargaining Power
+# Examines different levels of worker bargaining power
+Experiment6_BargainingPower:
+  name: "Worker Bargaining Power"
+  description: "Impact of different worker bargaining power levels"
+  parameter_sweeps:
+    ξ: [0.1, 0.3, 0.5, 0.7, 0.9]  # Worker share of match surplus
+  output_prefix: "exp6_bargaining"
+
+# Common settings for all experiments
+CommonSettings:
+  # Solver options
+  solver_options:
+    tol: 1e-8
+    max_iter: 50000
+    verbose: true
+    print_freq: 100
+    lambda_S_init: 0.01
+    lambda_u_init: 0.01
+  
+  # Output settings
+  save_results: true
+  output_directory: "src/structural_model_heterogenous_preferences/counterfactuals/results"
+  save_formats: ["csv", "yaml"]  # Save in both formats
+  
+  # Comparison settings
+  compare_to_baseline: true
+  compute_moments: true
+  simulation_data_path: "data/processed/simulation_scaffolding_2024.feather"
+  
+  # Parallel processing (if available)
+  use_parallel: false
+  n_workers: 4
+
+  # target_moments:
+  data_file: "data/results/data_moments/data_moments_2024.yaml"
+  moments_to_use:
+    # - mean_logwage
+    - var_logwage
+    - mean_alpha
+    - var_alpha
+    - inperson_share
+    - remote_share
+    - p90_p10_logwage
+    # - agg_productivity
+    - diff_alpha_high_lowpsi
+    - wage_premium_high_psi
+    # - wage_slope_psi
+    - market_tightness
+    - wage_alpha
+    - wage_alpha_curvature
+  # Moment Computation
+  moment_computation:
+    method: "simulation"  # Options: "analytic", "simulation"
+    simulated_data: "data/processed/simulation_scaffolding_2024.feather"

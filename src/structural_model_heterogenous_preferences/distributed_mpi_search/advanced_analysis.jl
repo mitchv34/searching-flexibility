@@ -1,7 +1,5 @@
 #!/usr/bin/env julia
-
-# Advanced MPI Search Analysis with Makie
-# Creates publication-quality diagnostic plots and comprehensive analysis
+# Clean Ground Truth Overlay Analysis Script
 
 using Pkg
 Pkg.activate("/project/high_tech_ind/searching-flexibility")
@@ -11,530 +9,231 @@ using CairoMakie
 using Statistics, StatsBase, LinearAlgebra
 using Printf, Dates
 using DataFrames, CSV
-using KernelDensity
-using Random; Random.seed!(123)  # For reproducibility
+using Random; Random.seed!(123)
 
-# Parse command line arguments for job ID
-JOB_ID = if length(ARGS) >= 1
-    strip(ARGS[1])  # Job ID as string
-else
-    nothing  # Analyze all jobs if no arguments
-end
+println("🎨 Advanced MPI Search Analysis (Ground Truth Overlays)")
 
-println("🎨 Advanced MPI Search Analysis with Makie")
-println("=" ^ 50)
-if JOB_ID !== nothing
-    println("📊 Analyzing job ID: $JOB_ID")
-else
-    println("📊 Analyzing all available jobs")
-end
+JOB_ID = length(ARGS) >= 1 ? strip(ARGS[1]) : nothing
 
-# Set Makie theme for publication quality
-set_theme!(Theme(
-    fontsize=12,
-    Axis=(
-        titlefont="TeX Gyre Heros Bold",
-        labelfont="TeX Gyre Heros",
-        ticklabelfont="TeX Gyre Heros",
-        spinewidth=1.5,
-        xtickwidth=1.5,
-        ytickwidth=1.5,
-    ),
-    Legend=(
-        framewidth=1.5,
-        labelfont="TeX Gyre Heros",
-    )
-))
+# Theme
+set_theme!(Theme(fontsize=12))
 
-# Configuration
 const SCRIPT_DIR = dirname(@__FILE__)
-const RESULTS_DIR = joinpath(SCRIPT_DIR, "output")
-const OUTPUT_DIR = if JOB_ID !== nothing
-    "figures/mpi_analysis/job_$JOB_ID"
-else
-    "figures/mpi_analysis"
-end
+const RESULTS_DIR = joinpath(SCRIPT_DIR, "output", "results")
+const OUTPUT_DIR = joinpath(SCRIPT_DIR, "figures")
 const PLOTS_DIR = OUTPUT_DIR
-
-# Create output directories
-mkpath(OUTPUT_DIR)
 mkpath(PLOTS_DIR)
 
-"""Find and load the most recent MPI search results for specified job"""
-function load_latest_results()
-    try
-        # Filter files based on job ID if specified
-        if JOB_ID !== nothing
-            pattern = "mpi_search_results_job$(JOB_ID)_"
-            files = filter(f -> startswith(f, pattern) && endswith(f, ".json"), 
-                            readdir(RESULTS_DIR))
-            if isempty(files)
-                error("No MPI search results found for job $JOB_ID!")
-            end
-        else
-            files = filter(f -> startswith(f, "mpi_search_results_") && endswith(f, ".json"), 
-                            readdir(RESULTS_DIR))
-            if isempty(files)
-                error("No MPI search results found!")
-            end
-        end
-        
-        # Sort by modification time, most recent first
-        full_paths = [joinpath(RESULTS_DIR, f) for f in files]
-        sorted_files = sort(full_paths, by=mtime, rev=true)
-        
-        # Try files in order until we find one that parses successfully
-        for file_path in sorted_files
-            try
-                println("📁 Attempting to load: $(basename(file_path))")
-                
-                content = read(file_path, String)
-                results = JSON3.read(content)
-                
-                println("✅ Successfully loaded: $(basename(file_path))")
-                return results, file_path
-            catch json_error
-                @warn "Failed to parse $(basename(file_path)): $json_error"
-                continue
-            end
-        end
-        
-        error("No valid JSON files found")
-    catch e
-        error("Failed to load results: $e")
-    end
+# ---------------- Utility -----------------
+function adaptive_valid_mask(objectives::AbstractVector{<:Real}; penalty_threshold=1e8, min_required=25)
+    finite_mask = isfinite.(objectives)
+    finite_vals = objectives[finite_mask]
+    if isempty(finite_vals); return falses(length(objectives)); end
+    base_mask = finite_mask .& (objectives .< penalty_threshold)
+    if count(base_mask) >= min_required; return base_mask; end
+    sorted_vals = sort(finite_vals)
+    k = min(length(sorted_vals), max(min_required, Int(clamp(round(length(sorted_vals)*0.01), 1, length(sorted_vals)))))
+    kth_val = sorted_vals[k]
+    p95 = quantile(sorted_vals, min(0.95, max(0.5, 1 - min_required/length(sorted_vals))))
+    adaptive_threshold = min(kth_val, p95)
+    return finite_mask .& (objectives .<= adaptive_threshold)
 end
 
-"""Display top N candidates leaderboard"""
-function create_top_candidates_analysis(results, save_prefix::String, top_n::Int=5)
-    if !haskey(results, "all_params") || !haskey(results, "all_objectives")
-        @warn "Missing data for top candidates analysis"
-        return
-    end
-    
-    all_params = results["all_params"]
-    all_objectives = results["all_objectives"]
-    param_names = results["parameter_names"]
-    
-    # Create pairs and filter valid results
-    objective_param_pairs = [(obj, params) for (obj, params) in zip(all_objectives, all_params) if obj < 1e8]
-    
-    if length(objective_param_pairs) < top_n
-        @warn "Not enough valid results for top $top_n analysis"
-        return
-    end
-    
-    # Sort by objective value (best first)
-    sorted_pairs = sort(objective_param_pairs, by=x->x[1])
-    top_candidates = sorted_pairs[1:min(top_n, length(sorted_pairs))]
-    
-    println("\n" * "="^80)
-    println("🏆 TOP $top_n CANDIDATES LEADERBOARD")
-    println("="^80)
-    
-    # Create DataFrame for top candidates
-    df_data = Dict{String, Any}()
-    df_data["Rank"] = Int[]
-    df_data["Objective"] = Float64[]
-    df_data["Improvement_Percent"] = Float64[]
-    
-    # Initialize parameter columns
-    for param_name in param_names
-        df_data[string(param_name)] = Float64[]
-    end
-    
-    best_obj = top_candidates[1][1]
-    
-    for (i, (obj, params)) in enumerate(top_candidates)
-        improvement = i == 1 ? 0.0 : ((best_obj - obj) / abs(best_obj)) * 100
-        
-        push!(df_data["Rank"], i)
-        push!(df_data["Objective"], obj)
-        push!(df_data["Improvement_Percent"], improvement)
-        
-        # Add parameter values using indices
-        for (param_idx, param_name) in enumerate(param_names)
-            param_val = params[param_idx]
-            push!(df_data[string(param_name)], param_val)
-        end
-    end
-    
-    # Create DataFrame
-    df = DataFrame(df_data)
-    
-    # Save to CSV
-    csv_path = joinpath(PLOTS_DIR, "$(save_prefix)/top_candidates.csv")
-    CSV.write(csv_path, df)
-    println("💾 Top candidates saved to: $csv_path")
-    
-    # Display summary
-    println(df)
-    
-    # Create visual comparison plot
-    fig = Figure(size=(1400, 1000))
-    
-    # Objective values comparison
-    ax1 = Axis(fig[1, 1],
-               title="Top $top_n Candidates - Objective Values",
-               xlabel="Rank",
-               ylabel="Objective Value")
-    
-    objectives_top = [pair[1] for pair in top_candidates]
-    barplot!(ax1, 1:length(objectives_top), objectives_top, 
-             color=range(colorant"darkgreen", colorant"lightgreen", length=length(objectives_top)))
-    
-    # Parameter comparison for top candidates
-    n_params = length(param_names)
-    n_cols = min(3, n_params)
-    n_rows = ceil(Int, n_params / n_cols)
-    
-    for (param_idx, param_name) in enumerate(param_names)
-        row = 1 + ceil(Int, param_idx / n_cols)
-        col = ((param_idx - 1) % n_cols) + 1
-        
-        if row <= 3  # Limit to avoid overcrowding
-            ax = Axis(fig[row, col],
-                     title="$param_name - Top $top_n",
-                     xlabel="Rank",
-                     ylabel="Parameter Value")
-            
-            param_values = [pair[2][param_idx] for pair in top_candidates]
-            barplot!(ax, 1:length(param_values), param_values,
-                    color=range(colorant"darkblue", colorant"lightblue", length=length(param_values)))
-            
-            # Add value labels on bars
-            for (i, val) in enumerate(param_values)
-                text!(ax, i, val + 0.02 * (maximum(param_values) - minimum(param_values)), 
-                     text=@sprintf("%.3f", val), align=(:center, :bottom), fontsize=10)
-            end
-        end
-    end
-    
-    plot_path = joinpath(PLOTS_DIR, "$(save_prefix)/top_candidates.png")
-    save(plot_path, fig)
-    println("📊 Top candidates analysis saved: $plot_path")
-    
-    return top_candidates
+function report_objective_distribution(objectives)
+    finite_vals = filter(isfinite, objectives)
+    isempty(finite_vals) && return
+    q = quantile
+    println(@sprintf("🔎 Objectives: n=%d min=%.4g median=%.4g max=%.4g", length(finite_vals), minimum(finite_vals), q(finite_vals,0.5), maximum(finite_vals)))
 end
 
-"""Create parameter trajectories for best candidates evolution"""
-function create_parameter_trajectories(results, save_prefix::String)
-    if !haskey(results, "all_params") || !haskey(results, "all_objectives")
-        @warn "Missing data for parameter trajectories"
-        return
+# -------------- Load results ----------------
+function load_latest_results(job_id::Union{Nothing,String})
+    isdir(RESULTS_DIR) || error("Results dir missing: $(RESULTS_DIR)")
+    files = filter(f->endswith(f,".json"), readdir(RESULTS_DIR; join=true))
+    files = filter(f->!occursin("live",f) && !occursin("history",f), files)
+    if job_id !== nothing
+        job_files = filter(f->occursin("job$(job_id)", f), files)
+        finals = filter(f->occursin("final", f), job_files)
+        chosen = isempty(finals) ? job_files : finals
+    else
+        finals = filter(f->occursin("final", f), files)
+        chosen = isempty(finals) ? files : finals
     end
-    
-    all_params = results["all_params"]
-    all_objectives = results["all_objectives"]
-    param_names = results["parameter_names"]
-    
-    # Find indices where new best was found
-    best_indices = Int[]
-    best_objectives = Float64[]
-    best_params_evolution = []
-    
-    current_best = Inf
-    for (i, (obj, params)) in enumerate(zip(all_objectives, all_params))
-        if obj < current_best && obj < 1e8
-            current_best = obj
-            push!(best_indices, i)
-            push!(best_objectives, obj)
-            push!(best_params_evolution, params)
-        end
-    end
-    
-    if length(best_indices) < 3
-        @warn "Not enough improvements for trajectory analysis"
-        return
-    end
-    
-    println("📈 Creating parameter trajectory analysis for $(length(best_indices)) improvements...")
-    
-    # Create trajectory plots
-    n_params = length(param_names)
-    n_cols = 3
-    n_rows = ceil(Int, n_params / n_cols)
-    
-    fig = Figure(size=(1400, 300 * n_rows))
-    
-    for (param_idx, param_name) in enumerate(param_names)
-        row = ceil(Int, param_idx / n_cols)
-        col = ((param_idx - 1) % n_cols) + 1
-        
-        ax = Axis(fig[row, col],
-                 title="Best $param_name Evolution",
-                 xlabel="Evaluation Number",
-                 ylabel=string(param_name))
-        
-        # Extract parameter values for this parameter
-        param_values = [params[param_idx] for params in best_params_evolution]
-        
-        # Plot trajectory
-        lines!(ax, best_indices, param_values, color=:steelblue, linewidth=3)
-        scatter!(ax, best_indices, param_values, color=:red, markersize=6)
-        
-        # Add trend analysis
-        if length(param_values) > 4
-            # Calculate moving average
-            window_size = max(2, length(param_values) ÷ 3)
-            if window_size < length(param_values)
-                moving_avg = [mean(param_values[max(1,i-window_size+1):i]) for i in window_size:length(param_values)]
-                avg_indices = best_indices[window_size:end]
-                lines!(ax, avg_indices, moving_avg, color=:orange, linewidth=2, linestyle=:dash)
-            end
-        end
-        
-        # Add annotations for significant changes
-        if length(param_values) > 1
-            changes = abs.(diff(param_values))
-            significant_changes = findall(changes .> 0.1 * std(param_values))
-            if !isempty(significant_changes) && length(significant_changes) < 5
-                for change_idx in significant_changes
-                    scatter!(ax, [best_indices[change_idx + 1]], [param_values[change_idx + 1]], 
-                            color=:yellow, markersize=12, marker=:star5, strokewidth=2, strokecolor=:black)
-                end
-            end
-        end
-    end
-    
-    # Add overall convergence info
-    Label(fig[0, :], text="Parameter Evolution During $(length(best_indices)) Improvements | " *
-                          "Best: $(round(minimum(best_objectives), digits=8)) | " *
-                          "Span: Eval $(minimum(best_indices)) → $(maximum(best_indices))",
-          fontsize=14)
-    
-    plot_path = joinpath(PLOTS_DIR, "$(save_prefix)/parameter_trajectories.png")
-    save(plot_path, fig)
-    println("📊 Parameter trajectories saved: $plot_path")
+    isempty(chosen) && error("No results JSON found")
+    sort!(chosen)
+    rf = last(chosen)
+    println("📁 Using results file: $(basename(rf))")
+    raw = JSON3.read(read(rf,String))
+    return Dict{String,Any}(pair for pair in pairs(raw)), rf
 end
 
-"""Create moment trajectories for best candidates evolution"""
-function create_moment_trajectories(results, save_prefix::String)
-    if !haskey(results, "all_moments") || !haskey(results, "all_objectives")
-        @warn "Missing moments data for moment trajectories"
-        return
+# -------------- Ground truth loaders ----------------
+const PROJECT_ROOT = "/project/high_tech_ind/searching-flexibility"
+function load_ground_truth_params(; path=get(ENV, "GROUND_TRUTH_PARAM_FILE", joinpath(PROJECT_ROOT, "data", "results", "estimated_parameters", "estimated_parameters_2024.yaml")))
+    if !isfile(path); @warn "GT param file missing: $(path)"; return Dict{String,Float64}(); end
+    y = YAML.load_file(path)
+    haskey(y, "ModelParameters") || return Dict{String,Float64}()
+    gt = Dict{String,Float64}()
+    for (k,v) in y["ModelParameters"]
+        v isa Real || continue
+        gt[string(k)] = float(v)
     end
-    
-    all_moments = results["all_moments"]
-    all_objectives = results["all_objectives"]
-    
-    # Find indices where new best was found
-    best_indices = Int[]
-    best_objectives = Float64[]
-    best_moments_evolution = []
-    
-    current_best = Inf
-    for (i, (obj, moments)) in enumerate(zip(all_objectives, all_moments))
-        if obj < current_best && obj < 1e8
-            current_best = obj
-            push!(best_indices, i)
-            push!(best_objectives, obj)
-            push!(best_moments_evolution, moments)
+    gt
+end
+function load_ground_truth_moments(; path=get(ENV, "GROUND_TRUTH_MOMENTS_FILE", joinpath(PROJECT_ROOT, "data", "results", "data_moments", "data_moments_groundtruth_2024.yaml")))
+    if !isfile(path); @warn "GT moments file missing: $(path)"; return Dict{String,Float64}(); end
+    y = YAML.load_file(path)
+    haskey(y, "DataMoments") || return Dict{String,Float64}()
+    dm = Dict{String,Float64}()
+    for (k,v) in y["DataMoments"]
+        v isa Real || continue
+        dm[string(k)] = float(v)
+    end
+    dm
+end
+GROUND_TRUTH_PARAMS = load_ground_truth_params()
+GROUND_TRUTH_MOMENTS = load_ground_truth_moments()
+println("✅ GT loaded: params=$(length(GROUND_TRUTH_PARAMS)) moments=$(length(GROUND_TRUTH_MOMENTS))")
+
+# -------------- Plots ----------------
+function create_parameter_trajectories(results, save_prefix)
+    haskey(results,"all_params") && haskey(results,"all_objectives") || return
+    params = results["all_params"]; objs = results["all_objectives"]; names = results["parameter_names"]
+    best_idx = Int[]; best_params = Vector{Vector{Float64}}(); best_objs = Float64[]
+    cur = Inf
+    valid = adaptive_valid_mask(objs)
+    for (i,(p,o,v)) in enumerate(zip(params,objs,valid))
+        if v && o < cur
+            cur = o; push!(best_idx,i); push!(best_params,p); push!(best_objs,o)
         end
     end
-    
-    if length(best_indices) < 3
-        @warn "Not enough improvements for moment trajectory analysis"
-        return
-    end
-    
-    # Get moment names from the first valid moments dict
-    moment_names = String[]
-    for moments in best_moments_evolution
-        if !isempty(moments)
-            moment_names = collect(keys(moments))
-            break
-        end
-    end
-    
-    if isempty(moment_names)
-        @warn "No valid moment names found"
-        return
-    end
-    
-    println("📈 Creating moment trajectory analysis for $(length(best_indices)) improvements...")
-    
-    # Create trajectory plots
-    n_moments = length(moment_names)
-    n_cols = 3
-    n_rows = ceil(Int, n_moments / n_cols)
-    
-    fig = Figure(size=(1400, 300 * n_rows))
-    
-    for (moment_idx, moment_name) in enumerate(moment_names)
-        row = ceil(Int, moment_idx / n_cols)
-        col = ((moment_idx - 1) % n_cols) + 1
-        
-        ax = Axis(fig[row, col],
-                 title="Best $moment_name Evolution",
-                 xlabel="Evaluation Number",
-                 ylabel=string(moment_name))
-        
-        # Extract moment values for this moment
-        moment_values = Float64[]
-        valid_indices = Int[]
-        
-        for (i, moments) in enumerate(best_moments_evolution)
-            if haskey(moments, moment_name) && isfinite(moments[moment_name])
-                push!(moment_values, moments[moment_name])
-                push!(valid_indices, best_indices[i])
-            end
-        end
-        
-        if length(moment_values) < 2
-            text!(ax, 0.5, 0.5, text="Insufficient data", align=(:center, :center), space=:relative)
-            continue
-        end
-        
-        # Plot trajectory
-        lines!(ax, valid_indices, moment_values, color=:steelblue, linewidth=3)
-        scatter!(ax, valid_indices, moment_values, color=:red, markersize=6)
-        
-        # Add trend analysis
-        if length(moment_values) > 4
-            # Calculate moving average
-            window_size = max(2, length(moment_values) ÷ 3)
-            if window_size < length(moment_values)
-                moving_avg = [mean(moment_values[max(1,i-window_size+1):i]) for i in window_size:length(moment_values)]
-                avg_indices = valid_indices[window_size:end]
-                lines!(ax, avg_indices, moving_avg, color=:orange, linewidth=2, linestyle=:dash)
-            end
-        end
-        
-        # Add annotations for significant changes
-        if length(moment_values) > 1
-            changes = abs.(diff(moment_values))
-            if std(moment_values) > 0
-                significant_changes = findall(changes .> 0.1 * std(moment_values))
-                if !isempty(significant_changes) && length(significant_changes) < 5
-                    for change_idx in significant_changes
-                        if change_idx + 1 <= length(valid_indices)
-                            scatter!(ax, [valid_indices[change_idx + 1]], [moment_values[change_idx + 1]], 
-                                    color=:yellow, markersize=12, marker=:star5, strokewidth=2, strokecolor=:black)
-                        end
-                    end
-                end
+    length(best_idx) < 2 && return
+    ncols=3; nrows=ceil(Int,length(names)/ncols)
+    fig=Figure(size=(420*ncols,280*nrows))
+    for (pi,pn) in enumerate(names)
+        row=ceil(Int,pi/ncols); col=((pi-1)%ncols)+1
+        ax=Axis(fig[row,col], title=string(pn), xlabel="Evaluation", ylabel="Value")
+        vals=[bp[pi] for bp in best_params]
+        lines!(ax,best_idx,vals,color=:steelblue,linewidth=3)
+        scatter!(ax,best_idx,vals,color=:steelblue,markersize=6)
+        # GT line solid red
+        for variant in (string(pn), replace(string(pn),"₀"=>"0"), replace(string(pn),"₁"=>"1"))
+            if haskey(GROUND_TRUTH_PARAMS, variant)
+                hlines!(ax,[GROUND_TRUTH_PARAMS[variant]], color=:red, linewidth=3)
+                break
             end
         end
     end
-    
-    # Add overall convergence info
-    Label(fig[0, :], text="Moment Evolution During $(length(best_indices)) Improvements | " *
-                          "Best Objective: $(round(minimum(best_objectives), digits=8)) | " *
-                          "Span: Eval $(minimum(valid_indices)) → $(maximum(valid_indices))",
-          fontsize=14)
-    
-    plot_path = joinpath(PLOTS_DIR, "$(save_prefix)/moment_trajectories.png")
-    save(plot_path, fig)
-    println("📊 Moment trajectories saved: $plot_path")
+    Label(fig[0,:], text="Parameter Trajectories (Best Improvements)", fontsize=16)
+    out=joinpath(PLOTS_DIR,"$(save_prefix)_parameter_trajectories.png"); save(out,fig)
+    println("📊 Parameter trajectories: $(out)")
 end
 
-"""Create moment sensitivity analysis plots"""
-function create_moment_sensitivity(results, save_prefix::String)
-    if !haskey(results, "all_moments") || !haskey(results, "all_params") || !haskey(results, "all_objectives")
-        @warn "Missing data for moment sensitivity analysis"
-        return
-    end
-    
-    all_moments = results["all_moments"]
-    all_params = results["all_params"]
-    all_objectives = results["all_objectives"]
-    param_names = results["parameter_names"]
-    
-    # Filter for valid data (convergent solutions)
-    valid_mask = [obj < 1e8 for obj in all_objectives]
-    valid_moments = all_moments[valid_mask]
-    valid_params = all_params[valid_mask]
-    
-    if length(valid_moments) < 10
-        @warn "Insufficient valid data for moment sensitivity analysis"
-        return
-    end
-    
-    # Get moment names from the first valid moments dict
-    moment_names = String[]
-    for moments in valid_moments
-        if !isempty(moments) && all(isfinite(v) for v in values(moments))
-            moment_names = collect(keys(moments))
-            break
-        end
-    end
-    
-    if isempty(moment_names)
-        @warn "No valid moment names found for sensitivity analysis"
-        return
-    end
-    
-    println("📊 Creating moment sensitivity analysis...")
-    
-    # Create correlation matrix between parameters and moments
-    n_params = length(param_names)
-    n_moments = length(moment_names)
-    
-    # Prepare data matrices
-    param_matrix = hcat([Float64[params[i] for params in valid_params] for i in 1:n_params]...)
-    moment_matrix = zeros(length(valid_moments), n_moments)
-    
-    # Fill moment matrix
-    for (i, moments) in enumerate(valid_moments)
-        for (j, moment_name) in enumerate(moment_names)
-            if haskey(moments, moment_name) && isfinite(moments[moment_name])
-                moment_matrix[i, j] = moments[moment_name]
-            else
-                moment_matrix[i, j] = NaN
+function create_parameter_analysis(results, save_prefix)
+    haskey(results,"all_params") && haskey(results,"all_objectives") || return
+    params=results["all_params"]; objs=results["all_objectives"]; names=results["parameter_names"]
+    mat=hcat(params...)'
+    valid=adaptive_valid_mask(objs)
+    matv=mat[valid,:]; objv=objs[valid]
+    length(objv)<10 && return
+    logobj=log.(objv .- minimum(objv) .+ 1e-9)
+    corrabs=[abs(cor(matv[:,i],logobj)) for i in 1:length(names)]
+    order=sortperm(corrabs, rev=true)
+    ncols=min(4,length(names)); nrows=ceil(Int,length(names)/ncols)
+    fig=Figure(size=(420*ncols,300*nrows))
+    for (plot_i,idxp) in enumerate(order)
+        row=ceil(Int,plot_i/ncols); col=((plot_i-1)%ncols)+1
+        ax=Axis(fig[row,col], title="$(names[idxp]) (|r|=$(round(corrabs[idxp],digits=3)))", xlabel=string(names[idxp]), ylabel="log obj")
+        vals=matv[:,idxp]
+        scatter!(ax, vals, logobj, color=:gray30, markersize=5)
+        for variant in (string(names[idxp]), replace(string(names[idxp]),"₀"=>"0"), replace(string(names[idxp]),"₁"=>"1"))
+            if haskey(GROUND_TRUTH_PARAMS, variant)
+                vlines!(ax,[GROUND_TRUTH_PARAMS[variant]], color=:red, linewidth=3)
+                break
             end
         end
     end
-    
-    # Calculate correlations
-    correlations = zeros(n_params, n_moments)
-    for i in 1:n_params
-        for j in 1:n_moments
-            valid_both = .!isnan.(moment_matrix[:, j])
-            if sum(valid_both) > 5
-                correlations[i, j] = cor(param_matrix[valid_both, i], moment_matrix[valid_both, j])
-            else
-                correlations[i, j] = NaN
-            end
-        end
-    end
-    
-    # Create heatmap
-    fig = Figure(size=(max(400, 100 * n_moments), max(300, 50 * n_params)))
-    ax = Axis(fig[1, 1],
-             title="Parameter-Moment Sensitivity Analysis",
-             xlabel="Target Moments",
-             ylabel="Parameters")
-    
-    # Replace NaN with 0 for visualization
-    correlations_viz = replace(correlations, NaN => 0.0)
-    
-    hm = heatmap!(ax, correlations_viz, colormap=:RdBu, colorrange=(-1, 1))
-    
-    # Set ticks and labels
-    ax.xticks = (1:n_moments, moment_names)
-    ax.yticks = (1:n_params, string.(param_names))
-    ax.xticklabelrotation = π/4
-    
-    # Add colorbar
-    Colorbar(fig[1, 2], hm, label="Correlation Coefficient")
-    
-    # Add correlation values as text
-    for i in 1:n_params
-        for j in 1:n_moments
-            if !isnan(correlations[i, j])
-                text!(ax, j, i, text=@sprintf("%.2f", correlations[i, j]),
-                     align=(:center, :center),
-                     color=abs(correlations[i, j]) > 0.5 ? :white : :black,
-                     fontsize=10)
-            end
-        end
-    end
-    
-    plot_path = joinpath(PLOTS_DIR, "$(save_prefix)/moment_sensitivity.png")
-    save(plot_path, fig)
-    println("📊 Moment sensitivity saved: $plot_path")
+    Label(fig[0,:], text="Parameter Sensitivity (log objective)", fontsize=16)
+    out=joinpath(PLOTS_DIR,"$(save_prefix)_parameter_sensitivity.png"); save(out,fig)
+    println("📊 Parameter sensitivity: $(out)")
 end
+
+function create_moment_trajectories(results, save_prefix)
+    haskey(results,"all_moments") && haskey(results,"all_objectives") || return
+    moms=results["all_moments"]; objs=results["all_objectives"]
+    best_idx=Int[]; best_moms=Vector{Dict{String,Float64}}(); cur=Inf
+    for (i,(mm,o)) in enumerate(zip(moms,objs))
+        if isfinite(o) && o<cur
+            cur=o
+            dict_mm=Dict{String,Float64}()
+            for (k,v) in mm
+                v isa Real || continue
+                dict_mm[string(k)] = float(v)
+            end
+            push!(best_idx,i); push!(best_moms,dict_mm)
+        end
+    end
+    length(best_idx)<2 && return
+    mset=Set{String}(); for mm in best_moms; for k in keys(mm); push!(mset,k); end; end
+    mnames=collect(mset)
+    ncols=3; nrows=ceil(Int,length(mnames)/ncols)
+    fig=Figure(size=(420*ncols,300*nrows))
+    for (mi,mn) in enumerate(mnames)
+        row=ceil(Int,mi/ncols); col=((mi-1)%ncols)+1
+        ax=Axis(fig[row,col], title=mn, xlabel="Evaluation", ylabel="Value")
+        vals=Float64[]; idxs=Int[]
+        for (j,mm) in enumerate(best_moms)
+            if haskey(mm,mn)
+                push!(vals,mm[mn]); push!(idxs,best_idx[j])
+            end
+        end
+        length(vals)<2 && (text!(ax,0.5,0.5,text="Insufficient",space=:relative); continue)
+        lines!(ax, idxs, vals, color=:steelblue, linewidth=3)
+        scatter!(ax, idxs, vals, color=:steelblue, markersize=6)
+        if haskey(GROUND_TRUTH_MOMENTS, mn)
+            hlines!(ax,[GROUND_TRUTH_MOMENTS[mn]], color=:red, linewidth=3)
+        end
+    end
+    Label(fig[0,:], text="Moment Trajectories", fontsize=16)
+    out=joinpath(PLOTS_DIR,"$(save_prefix)_moment_trajectories.png"); save(out,fig)
+    println("📊 Moment trajectories: $(out)")
+end
+
+function create_top_candidates_analysis(results, save_prefix; top_n=5)
+    haskey(results,"all_params") && haskey(results,"all_objectives") || return
+    params=results["all_params"]; objs=results["all_objectives"]; names=results["parameter_names"]
+    valid=adaptive_valid_mask(objs)
+    tuples=[(objs[i],params[i]) for i in eachindex(objs) if valid[i]]
+    isempty(tuples) && return
+    sort!(tuples, by=x->x[1])
+    top=tuples[1:min(top_n,length(tuples))]
+    df=DataFrame(Rank=Int[], Objective=Float64[])
+    for pn in names; df[!,string(pn)]=Float64[]; end
+    for (i,(o,p)) in enumerate(top)
+        push!(df.Rank,i); push!(df.Objective,o)
+        for (j,pn) in enumerate(names)
+            push!(df[!,string(pn)], p[j])
+        end
+    end
+    csv=joinpath(PLOTS_DIR,"$(save_prefix)_top_candidates.csv")
+    CSV.write(csv,df)
+    println("🏆 Top candidates CSV: $(csv)")
+end
+
+function run_all()
+    results, rf = load_latest_results(JOB_ID)
+    haskey(results,"all_objectives") && report_objective_distribution(results["all_objectives"])
+    ts=Dates.format(now(),"yyyymmdd_HHMMSS")
+    prefix = JOB_ID === nothing ? "alljobs_$(ts)" : "job$(JOB_ID)_$(ts)"
+    create_parameter_trajectories(results,prefix)
+    create_parameter_analysis(results,prefix)
+    create_moment_trajectories(results,prefix)
+    create_top_candidates_analysis(results,prefix)
+    println("✅ Analysis complete")
+end
+
+run_all()
+
 
 """Analyze moment mismatch for the best candidate - TEMPORARILY DISABLED"""
 #TODO:  Fix best candidates function
@@ -725,7 +424,7 @@ function analyze_best_candidate_moments(results, save_prefix::String)
             hlines!(ax3, [0], color=:black, linewidth=2)
         end
         
-        plot_path = joinpath(PLOTS_DIR, "$(save_prefix)/moment_analysis.png")
+        plot_path = joinpath(PLOTS_DIR, "$(save_prefix)_moment_analysis.png")
         save(plot_path, fig)
         println("📊 Moment analysis saved: $plot_path")
         
@@ -764,10 +463,28 @@ function create_convergence_analysis(results, save_prefix)
 
     # Vectorized best-so-far (cumulative minimum)
     best_history = accumulate(min, objectives)
+    # Determine burn-in skip: ignore early sharp drop for clarity
+    # Skip first N improvements or first BURN_FRAC of evaluations (whichever larger)
+    improvements = findall(diff(best_history) .< 0)
+    burn_frac = 0.02
+    burn_improvements = 10
+    burn_idx = 1
+    if !isempty(improvements)
+        if length(improvements) >= burn_improvements
+            burn_idx = improvements[burn_improvements]  # index before Nth improvement
+        else
+            burn_idx = last(improvements)
+        end
+    end
+    burn_idx = max(burn_idx, Int(clamp(round(n_evals * burn_frac),1,n_evals)))
 
     # Subsampled best history for plotting
     best_history_plot = best_history[plot_indices]
     plot_eval_nums = collect(plot_indices)
+    # Overlay truncated (post burn-in) for detail
+    truncated_mask = plot_eval_nums .>= burn_idx
+    truncated_evals = plot_eval_nums[truncated_mask]
+    truncated_best = best_history_plot[truncated_mask]
     
     # Create figure with multiple subplots
     fig = Figure(size=(1400, 1000))
@@ -778,7 +495,8 @@ function create_convergence_analysis(results, save_prefix)
                xlabel="Evaluation Number",
                ylabel="Best Objective Value")
 
-    lines!(ax1, plot_eval_nums, best_history_plot, color=:steelblue, linewidth=3)
+    lines!(ax1, plot_eval_nums, best_history_plot, color=(:steelblue,0.35), linewidth=2)
+    lines!(ax1, truncated_evals, truncated_best, color=:steelblue, linewidth=3)
     if length(plot_eval_nums) < 2000
         scatter!(ax1, plot_eval_nums, best_history_plot, color=:steelblue, markersize=4, alpha=0.7)
     end
@@ -803,13 +521,19 @@ function create_convergence_analysis(results, save_prefix)
                ylabel="Density")
     
     # Filter out penalty values for distribution
-    valid_objectives = objectives[objectives .< 1e8]
-    if !isempty(valid_objectives)
-        hist!(ax2, valid_objectives, bins=30, color=(:steelblue, 0.7), normalization=:pdf)
-        
-        # Add KDE if enough points
-        if length(valid_objectives) > 20
-            kde_result = kde(valid_objectives)
+    valid_objectives = objectives[adaptive_valid_mask(objectives)]
+    # Outlier filtering (upper tail) for clearer density: remove top 1% & bottom 0.5%
+    if length(valid_objectives) > 50
+        q_low = quantile(valid_objectives, 0.005)
+        q_high = quantile(valid_objectives, 0.99)
+        filtered = valid_objectives[(valid_objectives .>= q_low) .& (valid_objectives .<= q_high)]
+    else
+        filtered = valid_objectives
+    end
+    if !isempty(filtered)
+        hist!(ax2, filtered, bins=30, color=(:steelblue, 0.7), normalization=:pdf)
+        if length(filtered) > 20
+            kde_result = kde(filtered)
             lines!(ax2, kde_result.x, kde_result.density, color=:red, linewidth=3)
         end
     end
@@ -914,7 +638,7 @@ function create_convergence_analysis(results, save_prefix)
               fontsize=14)
     end
     
-    plot_path = joinpath(PLOTS_DIR, "$(save_prefix)/convergence_analysis.png")
+    plot_path = joinpath(PLOTS_DIR, "$(save_prefix)_convergence_analysis.png")
     save(plot_path, fig)
     println("📊 Convergence analysis saved: $plot_path")
 end
@@ -943,7 +667,7 @@ function create_parameter_analysis(results, save_prefix::String)
     # Convert to matrix and filter valid results
     param_matrix = hcat(all_params...)'
     objectives = collect(all_objectives)
-    valid_mask = objectives .< 1e8
+    valid_mask = adaptive_valid_mask(objectives)
     
     if sum(valid_mask) < 10
         @warn "Too few valid results for parameter analysis"
@@ -974,58 +698,63 @@ function create_parameter_analysis(results, save_prefix::String)
     
     Colorbar(fig1[1, 2], hm, label="Correlation")
     
-    plot_path1 = joinpath(PLOTS_DIR, "$(save_prefix)/parameter_correlations.png")
+    plot_path1 = joinpath(PLOTS_DIR, "$(save_prefix)_parameter_correlations.png")
     save(plot_path1, fig1)
     println("📊 Parameter correlations saved: $plot_path1")
     
-    # Parameter sensitivity analysis
-    fig2 = Figure(size=(1200, 800))
-    
-    # Calculate correlations with objective
-    obj_correlations = [abs(cor(param_matrix_clean[:, i], objectives_clean)) for i in 1:n_params]
-    sorted_indices = sortperm(obj_correlations, rev=true)
-    
-    # Top parameters subplot
-    top_n = min(6, n_params)
-    n_cols = 3
-    n_rows = 2
-    
-    for (plot_idx, param_idx) in enumerate(sorted_indices[1:top_n])
+    # Parameter sensitivity analysis (ALL parameters, log objective)
+    # Safely transform objective values to log scale (shift if any <= 0)
+    obj_vals = copy(objectives_clean)
+    if any(obj_vals .<= 0)
+        shift = abs(minimum(obj_vals)) + 1e-6
+        obj_vals .= obj_vals .+ shift
+    end
+    log_obj_vals = log.(obj_vals)
+
+    # Correlations with log objective
+    obj_correlations = [abs(cor(param_matrix_clean[:, i], log_obj_vals)) for i in 1:n_params]
+    sorted_indices = sortperm(obj_correlations, rev=true)  # order by strength
+
+    # Dynamic grid sizing
+    n_cols = min(4, n_params)
+    n_rows = ceil(Int, n_params / n_cols)
+    fig2 = Figure(size=(350 * n_cols, 300 * n_rows))
+
+    for (plot_idx, param_idx) in enumerate(sorted_indices)  # include ALL params
         row = ceil(Int, plot_idx / n_cols)
         col = ((plot_idx - 1) % n_cols) + 1
-        
+
         ax = Axis(fig2[row, col],
-                 title="$(param_names[param_idx]) (r=$(round(obj_correlations[param_idx], digits=3)))",
+                 title="$(param_names[param_idx]) (|r|=$(round(obj_correlations[param_idx], digits=3)))",
                  xlabel="Parameter Value",
-                 ylabel="Objective Value")
-        
-        # Scatter plot with color gradient
+                 ylabel="log(Objective Value)")
+
         param_values = param_matrix_clean[:, param_idx]
-        scatter!(ax, param_values, objectives_clean, 
-                color=objectives_clean, colormap=:viridis, markersize=6, alpha=0.7)
-        
-        # Add best point
-        if haskey(results, "best_params")
+        scatter!(ax, param_values, log_obj_vals,
+                 color=log_obj_vals, colormap=:viridis, markersize=5, alpha=0.75)
+
+        # Add best point (if available and valid)
+        if haskey(results, "best_params") && haskey(results, "best_objective")
             best_param = results["best_params"][string(param_names[param_idx])]
             best_obj = results["best_objective"]
-            scatter!(ax, [best_param], [best_obj], 
-                    color=:red, markersize=12, marker=:star5)
+            if best_obj > 0
+                scatter!(ax, [best_param], [log(best_obj)], color=:red, markersize=10, marker=:star5)
+            end
         end
-        
-        # Add trend line if correlation is significant
+
+        # Trend line if notable correlation
         if abs(obj_correlations[param_idx]) > 0.3 && length(param_values) > 20
-            # Simple linear regression
             X = hcat(ones(length(param_values)), param_values)
-            β = X \ objectives_clean
+            β = X \ log_obj_vals
             x_trend = range(minimum(param_values), maximum(param_values), length=100)
             y_trend = β[1] .+ β[2] .* x_trend
             lines!(ax, x_trend, y_trend, color=:red, linewidth=2, linestyle=:dash)
         end
     end
-    
-    plot_path2 = joinpath(PLOTS_DIR, "$(save_prefix)/parameter_sensitivity.png")
+
+    plot_path2 = joinpath(PLOTS_DIR, "$(save_prefix)_parameter_sensitivity.png")
     save(plot_path2, fig2)
-    println("📊 Parameter sensitivity saved: $plot_path2")
+    println("📊 Parameter sensitivity (all params, log objective) saved: $plot_path2")
 end
 
 """Create performance and efficiency analysis"""
@@ -1033,16 +762,16 @@ function create_performance_analysis(results, save_prefix::String)
     fig = Figure(size=(1200, 800))
     
     # Timing analysis
-    if haskey(results, "elapsed_time") && haskey(results, "n_evaluations")
+    if haskey(results, "elapsed_time") && (haskey(results, "n_evaluations") || haskey(results, "completed_evaluations"))
         total_time = results["elapsed_time"]
-        n_evals = results["n_evaluations"]
+        n_evals = haskey(results, "n_evaluations") ? results["n_evaluations"] : results["completed_evaluations"]
         n_workers = get(results, "n_workers", 1)
-        avg_time = results["avg_time_per_eval"]
+        avg_time = haskey(results, "avg_time_per_eval") ? results["avg_time_per_eval"] : (total_time / max(1,n_evals))
         
         # Create timing summary
         ax1 = Axis(fig[1, 1],
-                  title="Performance Summary",
-                  ylabel="Value")
+                    title="Performance Summary",
+                    ylabel="Value")
         
         categories = ["Total Time\n(min)", "Avg Time/Eval\n(sec)", "Throughput\n(eval/sec)", "Workers"]
         values = [total_time/60, avg_time, 1/avg_time, n_workers]
@@ -1053,9 +782,9 @@ function create_performance_analysis(results, save_prefix::String)
         
         # Efficiency metrics
         ax2 = Axis(fig[1, 2],
-                  title="Parallel Efficiency",
-                  xlabel="Metric",
-                  ylabel="Value")
+                    title="Parallel Efficiency",
+                    xlabel="Metric",
+                    ylabel="Value")
         
         # Calculate theoretical vs actual performance
         theoretical_speedup = n_workers
@@ -1099,7 +828,21 @@ function create_performance_analysis(results, save_prefix::String)
             push!(best_history, current_best)
         end
         
-        lines!(ax3, time_points, best_history, color=:steelblue, linewidth=3)
+        # Burn-in removal for clarity (same logic as convergence)
+        improvements = findall(diff(best_history) .< 0)
+        burn_improvements = 10
+        burn_idx = 1
+        if !isempty(improvements)
+            if length(improvements) >= burn_improvements
+                burn_idx = improvements[burn_improvements]
+            else
+                burn_idx = last(improvements)
+            end
+        end
+        burn_idx = max(burn_idx, Int(clamp(round(n_evals*0.02),1,n_evals)))
+        lines!(ax3, time_points, best_history, color=(:steelblue,0.35), linewidth=2)
+        lines!(ax3, time_points[burn_idx:end], best_history[burn_idx:end], color=:steelblue, linewidth=3)
+        ylims!(ax3, minimum(best_history[burn_idx:end])*0.999, maximum(best_history[burn_idx:end])*1.001)
         
         # Add annotations for major improvements
         improvements = findall(diff(best_history) .< -0.01 * abs(best_history[1]))
@@ -1109,30 +852,173 @@ function create_performance_analysis(results, save_prefix::String)
         end
     end
     
-    plot_path = joinpath(PLOTS_DIR, "$(save_prefix)/performance_analysis.png")
+    plot_path = joinpath(PLOTS_DIR, "$(save_prefix)_performance_analysis.png")
     save(plot_path, fig)
     println("📊 Performance analysis saved: $plot_path")
+end
+
+function model_fit_analysis(results)
+    # --- Resolve configuration source ---------------------------------------------------
+    config_obj = nothing
+    used_fallback = false
+    if haskey(results, :config_used)
+        try
+            config_obj = results[:config_used]
+        catch
+            config_obj = nothing
+        end
+    end
+    if config_obj === nothing
+        # Hardcoded fallback per user request
+        fallback_path = joinpath(SCRIPT_DIR, "mpi_search_config_test.yaml")
+        if isfile(fallback_path)
+            try
+                config_obj = YAML.load_file(fallback_path)
+                used_fallback = true
+            catch e
+                @warn "Failed to load fallback config at $(fallback_path): $e"
+            end
+        else
+            @warn "Fallback config file not found: $(fallback_path)"
+        end
+    end
+
+    # Guard against missing keys
+    if config_obj === nothing || !haskey(config_obj, "MPISearchConfig") || !haskey(config_obj["MPISearchConfig"], "target_moments")
+        @warn "Cannot perform model_fit_analysis: missing target moments configuration"
+        return
+    end
+
+    target_cfg = config_obj["MPISearchConfig"]["target_moments"]
+    if !(haskey(target_cfg, "data_file") && haskey(target_cfg, "moments_to_use"))
+        @warn "Target moments configuration incomplete (data_file / moments_to_use)"
+        return
+    end
+
+    data_file_moments = String(target_cfg["data_file"])
+    moments_list = Vector{String}(target_cfg["moments_to_use"])
+    if !isfile(data_file_moments)
+        @warn "Data moments file not found: $(data_file_moments)"
+        return
+    end
+    data_moments = load_moments_from_yaml(data_file_moments, include = moments_list)
+
+    # --- Extract best params & moments safely ------------------------------------------
+    if !haskey(results, :best_params) || !haskey(results, :best_moments)
+        @warn "Results missing best_params or best_moments"
+        return
+    end
+    best_params = Dict(results[:best_params])
+    model_moments = Dict(results[:best_moments])
+
+    println("\n" * "="^80)
+    println("📊 MOMENT COMPARISON SUMMARY")
+    println("="^80)
+    if used_fallback
+        println("(Using hardcoded fallback config: mpi_search_config_test.yaml)")
+    end
+    
+    # Prepare table data
+    moment_names = String[]
+    data_values = Float64[]
+    model_values = Float64[]
+    absolute_diffs = Float64[]
+    percent_diffs = Float64[]
+    
+    # Calculate statistics for each moment
+    for (moment_name, data_val) in data_moments
+        model_val = get(model_moments, moment_name, NaN)
+        
+        push!(moment_names, string(moment_name))
+        push!(data_values, data_val)
+        push!(model_values, model_val)
+        
+        if !isnan(model_val) && data_val != 0
+            abs_diff = abs(model_val - data_val)
+            pct_diff = abs_diff / abs(data_val) * 100
+            push!(absolute_diffs, abs_diff)
+            push!(percent_diffs, pct_diff)
+        else
+            push!(absolute_diffs, NaN)
+            push!(percent_diffs, NaN)
+        end
+    end
+    
+    # Create the table data matrix
+    table_data = hcat(
+        moment_names,
+        [@sprintf("%.6f", val) for val in data_values],
+        [isnan(val) ? "NaN" : @sprintf("%.6f", val) for val in model_values],
+        [isnan(val) ? "NaN" : @sprintf("%.6f", val) for val in absolute_diffs],
+        [isnan(val) ? "NaN" : @sprintf("%.2f%%", val) for val in percent_diffs]
+    )
+    
+    # Create headers
+    headers = ["Moment", "Data Value", "Model Value", "Abs. Difference", "% Error"]
+    
+    # Print the table
+    pretty_table(table_data, 
+                header=headers,
+                alignment=[:l, :r, :r, :r, :r],
+                crop=:none,
+                formatters=ft_printf("%.6f", [2, 3, 4]),
+                header_crayon=crayon"bold blue",
+                subheader_crayon=crayon"bold green")
+    
+    # Calculate summary statistics
+    valid_pct_diffs = percent_diffs[.!isnan.(percent_diffs)]
+    valid_abs_diffs = absolute_diffs[.!isnan.(absolute_diffs)]
+    
+    if !isempty(valid_pct_diffs)
+        println("\n📈 FIT SUMMARY STATISTICS:")
+        println("─"^50)
+        println("• Number of moments: $(length(moment_names))")
+        println("• Valid comparisons: $(length(valid_pct_diffs))")
+        println("• Mean absolute error: $(round(mean(valid_abs_diffs), digits=6))")
+        println("• Root mean squared error: $(round(sqrt(mean(valid_abs_diffs.^2)), digits=6))")
+        println("• Mean percentage error: $(round(mean(valid_pct_diffs), digits=2))%")
+        println("• Max percentage error: $(round(maximum(valid_pct_diffs), digits=2))%")
+        println("• Moments with <5% error: $(sum(valid_pct_diffs .< 5)) / $(length(valid_pct_diffs))")
+        println("• Moments with <10% error: $(sum(valid_pct_diffs .< 10)) / $(length(valid_pct_diffs))")
+        
+        # Identify best and worst fits
+        best_idx = argmin(valid_pct_diffs)
+        worst_idx = argmax(valid_pct_diffs)
+        valid_names = moment_names[.!isnan.(percent_diffs)]
+        
+        println("\n🏆 BEST FIT: $(valid_names[best_idx]) ($(round(valid_pct_diffs[best_idx], digits=2))% error)")
+        println("⚠️  WORST FIT: $(valid_names[worst_idx]) ($(round(valid_pct_diffs[worst_idx], digits=2))% error)")
+    end
+    
+    # Save summary to CSV as well
+    summary_df = DataFrame(
+        Moment = moment_names,
+        Data_Value = data_values,
+        Model_Value = model_values,
+        Absolute_Difference = absolute_diffs,
+        Percent_Error = percent_diffs
+    )
+    
+    csv_path = joinpath(PLOTS_DIR, "moment_comparison_summary.csv")
+    CSV.write(csv_path, summary_df)
+    println("\n💾 Moment comparison saved to: $csv_path")
 end
 
 """Main analysis function"""
 # function run_advanced_analysis()
     println("🔍 Loading MPI search results...")
     results, results_file = load_latest_results();
-    
-    # Use fixed filename prefix for overwriting plots (without directory path)
-    save_prefix = begin
-        filename = basename(results_file)
-        # Extract job ID from filename like "mpi_search_results_job3052881_2025-08-22_03-35-34.json"
-        job_match = match(r"mpi_search_results_(job\d+)_", filename)
-        if job_match !== nothing
-            job_id = job_match.captures[1]
-            String(job_id)
-        else
-            ""
+    if haskey(results, "all_objectives")
+        try
+            report_objective_distribution(results["all_objectives"])
+        catch e
+            @warn "Objective distribution diagnostic failed" exception=e
         end
     end
-    # Ensure the directory exists
-    mkpath(PLOTS_DIR * "/" * save_prefix)
+    
+    # Simple filename prefix from job ID
+    job_id = JOB_ID !== nothing ? JOB_ID : "latest"
+    save_prefix = string("mpi_search_", job_id)
 
     println("🎨 Creating publication-quality plots...")
     
@@ -1158,6 +1044,8 @@ end
     
     # 5. Moment mismatch analysis for best candidate (commented out due to dependencies)
     analyze_best_candidate_moments(results, save_prefix)
+    
+    model_fit_analysis(results)
     
     # Print summary
     println("\n" * "="^60)
@@ -1193,5 +1081,10 @@ end
     println("   • Moment Trajectories: $(save_prefix)_moment_trajectories.png")
     println("   • Moment Sensitivity: $(save_prefix)_moment_sensitivity.png")
     println("   • Moment Analysis: $(save_prefix)_moment_analysis.png")
+    println("   • Objective Sensitivity: $(save_prefix)_objective_sensitivity.png")
+    println("   • Sensitivity Heatmap: $(save_prefix)_sensitivity_heatmap.png")
 
-println("\n🎯 Advanced MPI analysis complete!")
+    println("\n🎯 Advanced MPI analysis complete!")
+
+
+
