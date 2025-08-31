@@ -1,0 +1,117 @@
+---
+title: "The Great Re-Valuation: Preferences, Technology, and the Rise of Remote Work"
+date: last-modified
+date-format: long
+author:
+  - name: "Mitchell Valdes-Bobes"
+    id: mv
+    email: valdsbobes@wisc.edu
+    affiliation:
+      - name: University of Wisconsin-Madison
+        city: Madison
+        state: WI
+        url: https://econ.wisc.edu/
+  - name: "Anna Lukianova"
+    id: al
+    email: lukianova@wisc.edu
+    affiliation:
+      - name: University of Wisconsin-Madison
+        city: Madison
+        state: WI
+        url: https://econ.wisc.edu/
+resource-path: ["../output/figures/manuscript", "../output/tables/manuscript"] # Point to output folders
+abstract: >
+    Write the final abstract based on the estimated results. Should cover: Motivation (post-pandemic shift), Question (Preferences vs. Technology), Method (Structural search model with heterogeneity), Estimation (SMM on 2019 vs. 2024), Key Finding (Preference shock dominates), and Contribution (Structural decomposition).
+bibliographystyle: chicago-fullnote
+crossref:
+  appendix-title: "Appendix"
+  appendix-delim: "."
+format:
+  pdf:
+    keep-tex: true
+    toc: false
+    number-sections: true
+    fontsize: 11pt
+    fontfamily: lmodern
+    geometry:
+      - margin=1in
+      - top=0.9in
+      - bottom=0.9in
+    linestretch: 1.5
+    pdf-engine: xelatex
+    include-in-header:
+      text: |
+        \usepackage{amsmath}
+        \usepackage{amsthm}
+        \usepackage{amssymb}
+        \usepackage{amsfonts}
+        \usepackage{booktabs}
+        \usepackage{setspace}
+        \usepackage{graphicx}
+        \usepackage{algorithm}
+        \usepackage[noend]{algpseudocode}
+        % Define math operators if needed
+        \DeclareMathOperator*{\argmax}{arg\,max}
+        \DeclareMathOperator*{\Exp}{\mathbb{E}} % Expectation operator
+        \newcommand{\sym}[1]{\ensuremath{^{#1}}}
+fig-dpi: 320
+editor:
+    render-on-save: true
+---
+
+
+<!-- This is the main file that assembles the manuscript. -->
+<!-- Each section is written in a separate .md file for clarity. -->
+
+<!-- Section 1: Introduction -->
+{{< include "1_introduction.md" >}}
+
+
+<!-- Section 2: Data and Stylized Facts -->
+{{< include "2_data_and_stylized_facts.md" >}}
+
+<!-- Section 3: The Model -->
+{{< include "3_model.md" >}}
+
+
+<!-- Section 4: Estimation Strategy -->
+{{< include "4_estimation_strategy.md" >}}
+
+<!-- Section 5: Results -->
+{{< include "5_results.md" >}}
+
+<!-- Section 6: Counterfactuals -->
+{{< include "6_counterfactuals.md" >}}
+
+<!-- Section 7: Conclusion -->
+<!-- {{< include "7_conclusion.md" >}} -->
+
+
+\newpage
+<!-- This unnumbered section is for the bibliography -->
+<!-- ## References {.unnumbered}
+::: {#refs}
+::: -->
+
+
+\newpage
+<!-- Appendix Formatting: Reset counters and change section numbering to letters -->
+\setcounter{section}{0}
+\renewcommand{\thesection}{\Alph{section}}
+\setcounter{table}{0}
+\renewcommand{\thetable}{A\arabic{table}}
+\setcounter{figure}{0}
+\renewcommand{\thefigure}{A\arabic{figure}}
+
+# Appendix
+
+<!-- Appendix A: Model Derivations -->
+{{< include "A_model_derivations.md" >}}
+
+<!-- Appendix B: Identification Analysis -->
+{{< include "B_identification_analysis.md" >}}
+
+<!-- Appendix C: Data Appendix -->
+{{< include "C_data_appendix.md" >}}
+
+
