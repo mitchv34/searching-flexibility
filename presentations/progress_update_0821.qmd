@@ -1,0 +1,125 @@
+---
+title: "The Great Re-Valuation: A Structural Analysis of Remote Work"
+subtitle: "Project Status and Next Steps"
+author: "Mitchell Valdes-Bobes, Anna Lukianova"
+date: "today"
+format: 
+  beamer:
+    theme: metropolis
+    colortheme: default
+    aspectratio: 169  # <-- ADD THIS LINE FOR WIDESCREEN
+    slide-level: 2
+---
+
+# Introduction
+
+## Project Status: Significant Progress
+
+**High-Level Summary:** The structural model is built, numerically stable, and shows strong identification. We are ready to move from development and testing to the main estimation phase.
+
+**Key Achievements:**
+
+-   **Model Built & Solved:** A rich search and matching model with heterogeneous agents and continuous remote work choice.
+-   **Solver Optimized:** The solver is now highly efficient (low memory allocation) and robust (handles difficult parameter regions).
+-   **Identification Confirmed:** Extensive likelihood profiling and sensitivity analysis confirm that all key structural parameters are well-identified by observable moments.
+-   **Plausible Baseline Calibrated:** The model has been calibrated to a baseline that is numerically stable and operates in an economically plausible regime.
+
+---
+
+## Expanded Research Question: Preferences vs. Technology
+
+The project's scope has evolved from a narrow focus on wage gaps to a broader, more fundamental question.
+
+**Initial Focus:**
+
+- What is the compensating wage differential for remote work?
+
+**Expanded Scope:**
+
+- What were the fundamental drivers of the post-pandemic shift in work arrangements? We aim to disentangle two primary forces:
+    1.  **A Preference Shock:** Did workers' valuation of the remote work amenity fundamentally increase?
+    2.  **A Technology Shock:** Did remote work become significantly more productive?
+---
+
+## Expanded Research Question: Preferences vs. Technology
+
+**Key Questions We Can Now Answer:**
+
+- How did the **average** preference for remote work ($c_0$) and the **diversity** of those preferences ($\mu$) change from 2019 to 2024?
+- How much did the **relative productivity** of remote work ($\psi_0, \nu$) actually improve?
+- Did the **relationship between skill and remote technology** ($\phi$) change, altering sorting patterns in the labor market?
+
+---
+
+## The Model at a Glance: Key Mechanisms
+
+We use a structural search model to create a "digital twin" of the U.S. labor market, allowing us to measure the unobservable forces driving agent decisions.
+
+:::: {.columns}
+
+::: {.column width="50%"}
+**Who is in the economy?**
+
+-   **Workers:**
+    -   Heterogeneous in skill ($h$).
+    -   Have idiosyncratic preferences for remote (Gumbel shock).
+
+-   **Firms:**
+    -   Heterogeneous in remote efficiency ($\psi$).
+
+-   **The Market:**
+    -   A frictional (random) search market.
+:::
+
+::: {.column width="50%"}
+**What are their key decisions?**
+
+-   **Worker-Firm Pair ($\alpha$):**
+    -   Jointly choose the optimal share of remote work ($\alpha$).
+    -   Decision is driven by the trade-off between **productivity** and **amenity value** of remote.
+
+-   **Firms:**
+    -   Post vacancies based on free entry conditions.
+
+-   **Wages:**
+    -   Determined by bargaining ($\xi$) and include a compensating differential.
+:::
+
+::::
+
+---
+
+## Estimation Strategy: Matching the Model to the Data
+
+We estimate the model by forcing it to replicate key features of the U.S. labor market in two distinct periods: 2019 and 2024.
+
+**Overall Approach:** Simulated Method of Moments (SMM)
+
+1.  **Establish Empirical Facts:** We construct a set of 9-10 key data moments that characterize the labor market in each period (e.g., wage levels, remote work shares, sorting patterns, market tightness).
+2.  **Find the Parameters:** We use a global search algorithm to find the set of structural parameters that allows the model to best replicate these empirical facts.
+3.  **Compare the Periods:** The core of the analysis is comparing the estimated parameter vectors ($\theta_{2019}$ vs. $\theta_{2024}$) to identify the structural changes in the economy.
+
+---
+
+## Estimation Strategy: Matching the Model to the Data
+
+**Identification is Confirmed:** Our sensitivity analysis (see Appendix plots) confirms that our chosen moments are highly informative about the key parameters.
+
+| **Data Moments Related To...** | **Inform...**                               |
+| :----------------------------- | :------------------------------------------ |
+| Wages & Productivity           | Skill Distribution & Technology ($a_h, b_h, A_1$)  |
+| Work Arrangements              | Preferences ($c_0, \mu, \chi$)                    |
+| Sorting Patterns               | Remote Tech & Complementarity ($\nu, \phi$)      |
+| Market Frictions               | Search Costs & Bargaining ($\kappa_0, \xi$)         |
+
+---
+
+## Next Steps: A 10-Day Plan to Preliminary Results
+
+- **1: Large-Scale Global Search (Days 1-4)**
+
+- **2: Final SMM Estimation (Days 5-8)**
+  -   **Task:** Launch the final, precise SMM estimation using a local optimizer (e.g., BFGS), starting from the best vector found in Phase 1.
+    -   **Goal:** Obtain the final parameter estimates and their standard errors for both the 2019 and 2024 periods.
+- **3: Preliminary Analysis & Results (Days 9-10)**
+  -   **Task:** Analyze the differences in the estimated parameter vectors between the two periods. Run model fit checks.
